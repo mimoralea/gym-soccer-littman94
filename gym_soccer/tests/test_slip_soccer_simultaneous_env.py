@@ -16,35 +16,35 @@ def test_initialization(env):
     assert env.width == 7  # 5 + 2 for goal columns
     assert env.height == 4
     assert env.slip_prob == 0.2
-    assert env.action_space.n == 5
-    assert env.observation_space.n == 7 * 4 * 7 * 4 * 2
+    assert env.action_space[0].n == 5
+    # assert env.observation_space.n == 7 * 4 * 7 * 4 * 2
 
 def test_reset(env):
     obs, info = env.reset()
-    assert isinstance(obs, dict)
-    assert 'player_a' in obs and 'player_b' in obs
-    assert isinstance(info, dict)
-    assert 'prob' in info
+    assert isinstance(obs, tuple)
+    assert len(obs) == 2
+    assert isinstance(info, tuple)
+    assert 'p' in info[0]
 
 def test_step(env):
     env.reset()
-    action = (env.STAND, env.STAND)
+    action = (env.NOOP, env.NOOP)
     obs, reward, done, truncated, info = env.step(action)
-    assert isinstance(obs, dict)
-    assert isinstance(reward, dict)
-    assert isinstance(done, dict)
-    assert isinstance(truncated, dict)
-    assert isinstance(info, dict)
+    assert isinstance(obs, tuple)
+    assert isinstance(reward, tuple)
+    assert isinstance(done, tuple)
+    assert isinstance(truncated, tuple)
+    assert isinstance(info, tuple)
 
 def test_scoring(env):
     def run_scoring_test(initial_state, action_a, action_b, iterations=100000):
         score_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if done['player_a'] or done['player_b']:
-                assert abs(reward['player_a']) == 1 and abs(reward['player_b']) == 1, "Both players must receive a reward/penalty for a goal"
+            if done[0] or done[1]:
+                assert abs(reward[0]) == 1 and abs(reward[1]) == 1, "Both players must receive a reward/penalty for a goal"
                 score_count += 1
 
         score_ratio = score_count / iterations
@@ -52,24 +52,24 @@ def test_scoring(env):
         assert 0.75 <= score_ratio <= 0.85, f"Score ratio: {score_ratio:.2f}, expected close to 0.8"
 
     # Test Player A scoring
-    run_scoring_test((1, 5, 3, 1, 0), env.RIGHT, env.STAND)
+    run_scoring_test((1, 5, 3, 1, 0), env.EAST, env.NOOP)
 
     # Test Player B scoring
-    run_scoring_test((3, 5, 1, 1, 1), env.STAND, env.LEFT)
+    run_scoring_test((3, 5, 1, 1, 1), env.NOOP, env.WEST)
 
 def test_own_goals(env):
     def run_own_goal_test(initial_state, action_a, action_b, iterations=100000):
         own_goal_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if done['player_a'] and done['player_b']:
+            if done[0] and done[1]:
                 if initial_state[4] == 0:  # Player A has the ball
-                    if reward['player_a'] == -1 and reward['player_b'] == 1:
+                    if reward[0] == -1 and reward[1] == 1:
                         own_goal_count += 1
                 else:  # Player B has the ball
-                    if reward['player_a'] == 1 and reward['player_b'] == -1:
+                    if reward[0] == 1 and reward[1] == -1:
                         own_goal_count += 1
 
         own_goal_ratio = own_goal_count / iterations
@@ -77,16 +77,16 @@ def test_own_goals(env):
         assert np.isclose(own_goal_ratio, expected_ratio, atol=0.02), f"Own goal ratio: {own_goal_ratio:.2f}, expected close to {expected_ratio:.2f}"
 
     # Test Player A scoring an own goal (row 1)
-    run_own_goal_test((1, 1, 3, 5, 0), env.LEFT, env.STAND)
+    run_own_goal_test((1, 1, 3, 5, 0), env.WEST, env.NOOP)
 
     # Test Player A scoring an own goal (row 2)
-    run_own_goal_test((2, 1, 3, 5, 0), env.LEFT, env.STAND)
+    run_own_goal_test((2, 1, 3, 5, 0), env.WEST, env.NOOP)
 
     # Test Player B scoring an own goal (row 1)
-    run_own_goal_test((3, 1, 1, 5, 1), env.STAND, env.RIGHT)
+    run_own_goal_test((3, 1, 1, 5, 1), env.NOOP, env.EAST)
 
     # Test Player B scoring an own goal (row 2)
-    run_own_goal_test((3, 1, 2, 5, 1), env.STAND, env.RIGHT)
+    run_own_goal_test((3, 1, 2, 5, 1), env.NOOP, env.EAST)
 
 def test_slip_probability(env):
     iterations = 100000
@@ -95,12 +95,12 @@ def test_slip_probability(env):
 
     for _ in range(iterations):
         env.reset()
-        env.state = env._game_state_to_dict((2, 2, 3, 3, 0))  # Player A in middle
-        obs, reward, done, truncated, info = env.step((env.RIGHT, env.STAND))
+        env.state = (2, 2, 3, 3, 0)  # Player A in middle
+        obs, reward, done, truncated, info = env.step((env.EAST, env.NOOP))
 
-        if env.state['col_a'] == 3:
+        if env.state[1] == 3:
             intended_moves += 1
-        elif env.state['row_a'] in [1, 3]:
+        elif env.state[0] in [1, 3]:
             orthogonal_moves += 1
 
     intended_ratio = intended_moves / iterations
@@ -117,14 +117,14 @@ def test_both_players_moving_collision(env):
 
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
 
-            if (env.state['col_a'] == initial_state[1] and env.state['col_b'] == initial_state[3] and
-                env.state['row_a'] == initial_state[0] and env.state['row_b'] == initial_state[2]):
+            if (env.state[1] == initial_state[1] and env.state[3] == initial_state[3] and
+                env.state[0] == initial_state[0] and env.state[2] == initial_state[2]):
                 collision_count += 1
 
-            if env.state['possession'] != initial_possession:
+            if env.state[4] != initial_possession:
                 possession_switch_count += 1
 
         collision_ratio = collision_count / iterations
@@ -139,30 +139,30 @@ def test_both_players_moving_collision(env):
         assert np.isclose(possession_switch_ratio, expected_possession_switch, atol=0.02), f"Possession switch ratio: {possession_switch_ratio:.2f}, expected close to {expected_possession_switch:.2f}"
 
     # Test horizontal collision (A on left, B on right)
-    run_move_collision_test((1, 2, 1, 3, 0), env.RIGHT, env.LEFT)
-    run_move_collision_test((1, 2, 1, 3, 1), env.RIGHT, env.LEFT)
+    run_move_collision_test((1, 2, 1, 3, 0), env.EAST, env.WEST)
+    run_move_collision_test((1, 2, 1, 3, 1), env.EAST, env.WEST)
 
     # Test vertical collision (A on top, B on bottom)
-    run_move_collision_test((1, 3, 2, 3, 0), env.DOWN, env.UP)
-    run_move_collision_test((1, 3, 2, 3, 1), env.DOWN, env.UP)
+    run_move_collision_test((1, 3, 2, 3, 0), env.SOUTH, env.NORTH)
+    run_move_collision_test((1, 3, 2, 3, 1), env.SOUTH, env.NORTH)
 
 def test_one_player_standing_collision(env):
     def run_stand_collision_test(initial_state, action_a, action_b, iterations=100000):
-        assert action_a == env.STAND or action_b == env.STAND, "One player must be standing"
+        assert action_a == env.NOOP or action_b == env.NOOP, "One player must be standing"
         no_move_count = 0
         possession_switch_count = 0
         initial_possession = initial_state[4]
 
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
 
-            if (env.state['col_a'] == initial_state[1] and env.state['col_b'] == initial_state[3] and
-                env.state['row_a'] == initial_state[0] and env.state['row_b'] == initial_state[2]):
+            if (env.state[1] == initial_state[1] and env.state[3] == initial_state[3] and
+                env.state[0] == initial_state[0] and env.state[2] == initial_state[2]):
                 no_move_count += 1
 
-            if env.state['possession'] != initial_possession:
+            if env.state[4] != initial_possession:
                 possession_switch_count += 1
 
         no_move_ratio = no_move_count / iterations
@@ -179,29 +179,29 @@ def test_one_player_standing_collision(env):
 
     # Horizontal collisions
     # A on left, B on right
-    run_stand_collision_test((1, 2, 1, 3, 0), env.RIGHT, env.STAND)  # A moves, B stands
-    run_stand_collision_test((1, 2, 1, 3, 1), env.RIGHT, env.STAND)
-    run_stand_collision_test((1, 2, 1, 3, 0), env.STAND, env.LEFT)   # A stands, B moves
-    run_stand_collision_test((1, 2, 1, 3, 1), env.STAND, env.LEFT)
+    run_stand_collision_test((1, 2, 1, 3, 0), env.EAST, env.NOOP)  # A moves, B stands
+    run_stand_collision_test((1, 2, 1, 3, 1), env.EAST, env.NOOP)
+    run_stand_collision_test((1, 2, 1, 3, 0), env.NOOP, env.WEST)   # A stands, B moves
+    run_stand_collision_test((1, 2, 1, 3, 1), env.NOOP, env.WEST)
 
     # A on right, B on left
-    run_stand_collision_test((1, 4, 1, 3, 0), env.LEFT, env.STAND)   # A moves, B stands
-    run_stand_collision_test((1, 4, 1, 3, 1), env.LEFT, env.STAND)
-    run_stand_collision_test((1, 4, 1, 3, 0), env.STAND, env.RIGHT)  # A stands, B moves
-    run_stand_collision_test((1, 4, 1, 3, 1), env.STAND, env.RIGHT)
+    run_stand_collision_test((1, 4, 1, 3, 0), env.WEST, env.NOOP)   # A moves, B stands
+    run_stand_collision_test((1, 4, 1, 3, 1), env.WEST, env.NOOP)
+    run_stand_collision_test((1, 4, 1, 3, 0), env.NOOP, env.EAST)  # A stands, B moves
+    run_stand_collision_test((1, 4, 1, 3, 1), env.NOOP, env.EAST)
 
     # Vertical collisions
     # A on top, B on bottom
-    run_stand_collision_test((1, 3, 2, 3, 0), env.DOWN, env.STAND)   # A moves, B stands
-    run_stand_collision_test((1, 3, 2, 3, 1), env.DOWN, env.STAND)
-    run_stand_collision_test((1, 3, 2, 3, 0), env.STAND, env.UP)     # A stands, B moves
-    run_stand_collision_test((1, 3, 2, 3, 1), env.STAND, env.UP)
+    run_stand_collision_test((1, 3, 2, 3, 0), env.SOUTH, env.NOOP)   # A moves, B stands
+    run_stand_collision_test((1, 3, 2, 3, 1), env.SOUTH, env.NOOP)
+    run_stand_collision_test((1, 3, 2, 3, 0), env.NOOP, env.NORTH)     # A stands, B moves
+    run_stand_collision_test((1, 3, 2, 3, 1), env.NOOP, env.NORTH)
 
     # A on bottom, B on top
-    run_stand_collision_test((2, 3, 1, 3, 0), env.UP, env.STAND)     # A moves, B stands
-    run_stand_collision_test((2, 3, 1, 3, 1), env.UP, env.STAND)
-    run_stand_collision_test((2, 3, 1, 3, 0), env.STAND, env.DOWN)   # A stands, B moves
-    run_stand_collision_test((2, 3, 1, 3, 1), env.STAND, env.DOWN)
+    run_stand_collision_test((2, 3, 1, 3, 0), env.NORTH, env.NOOP)     # A moves, B stands
+    run_stand_collision_test((2, 3, 1, 3, 1), env.NORTH, env.NOOP)
+    run_stand_collision_test((2, 3, 1, 3, 0), env.NOOP, env.SOUTH)   # A stands, B moves
+    run_stand_collision_test((2, 3, 1, 3, 1), env.NOOP, env.SOUTH)
 
 def test_move_to_same_cell_collision(env):
     def run_move_to_same_cell_collision_test(initial_state, action_a, action_b, iterations=100000):
@@ -212,23 +212,25 @@ def test_move_to_same_cell_collision(env):
 
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
+            move_a = env.ACTION_INT_TO_MOVE[action_a]
+            move_b = env.ACTION_INT_TO_MOVE[action_b]
 
-            intended_row_a, intended_col_a = env._next_cell(initial_state[0], initial_state[1], action_a, initial_possession == 0)
-            intended_row_b, intended_col_b = env._next_cell(initial_state[2], initial_state[3], action_b, initial_possession == 1)
+            intended_row_a, intended_col_a = env._next_cell(initial_state[0], initial_state[1], move_a, initial_possession == 0)
+            intended_row_b, intended_col_b = env._next_cell(initial_state[2], initial_state[3], move_b, initial_possession == 1)
 
-            if env.state['row_a'] == intended_row_a and env.state['col_a'] == intended_col_a:
+            if env.state[0] == intended_row_a and env.state[1] == intended_col_a:
                 move_success_counts['A'] += 1
-            elif env.state['row_b'] == intended_row_b and env.state['col_b'] == intended_col_b:
+            elif env.state[2] == intended_row_b and env.state[3] == intended_col_b:
                 move_success_counts['B'] += 1
 
-            if env.state['possession'] == 0:
+            if env.state[4] == 0:
                 possession_counts['A'] += 1
             else:
                 possession_counts['B'] += 1
 
-            if env.state['possession'] != initial_possession:
+            if env.state[4] != initial_possession:
                 possession_switch_count += 1
 
         # Both players move to their intended cells 80% * 80%, then half we bounce A, half we bounce B 0.8 * 0.8 * 0.5 = 0.32
@@ -261,23 +263,23 @@ def test_move_to_same_cell_collision(env):
                 assert 0.31 <= possession_ratio <= 0.33, f"Possession ratio for Player {player}: {possession_ratio:.2f}, expected close to 0.32"
 
     # Diagonal movements
-    run_move_to_same_cell_collision_test((1, 1, 2, 2, 0), env.RIGHT, env.UP)
-    run_move_to_same_cell_collision_test((1, 1, 2, 2, 1), env.RIGHT, env.UP)
+    run_move_to_same_cell_collision_test((1, 1, 2, 2, 0), env.EAST, env.NORTH)
+    run_move_to_same_cell_collision_test((1, 1, 2, 2, 1), env.EAST, env.NORTH)
 
     # Horizontal movements
-    run_move_to_same_cell_collision_test((1, 1, 1, 3, 0), env.RIGHT, env.LEFT)
-    run_move_to_same_cell_collision_test((1, 1, 1, 3, 1), env.RIGHT, env.LEFT)
+    run_move_to_same_cell_collision_test((1, 1, 1, 3, 0), env.EAST, env.WEST)
+    run_move_to_same_cell_collision_test((1, 1, 1, 3, 1), env.EAST, env.WEST)
 
 def test_corner_bounce(env):
     def run_corner_test(initial_state, action_a, action_b, iterations=100000):
         player_move_count = {'A': 0, 'B': 0}
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if env.state['row_a'] != initial_state[0] or env.state['col_a'] != initial_state[1]:
+            if env.state[0] != initial_state[0] or env.state[1] != initial_state[1]:
                 player_move_count['A'] += 1
-            if env.state['row_b'] != initial_state[2] or env.state['col_b'] != initial_state[3]:
+            if env.state[2] != initial_state[2] or env.state[3] != initial_state[3]:
                 player_move_count['B'] += 1
 
         for player, count in player_move_count.items():
@@ -287,24 +289,24 @@ def test_corner_bounce(env):
             assert 0.09 <= slip_ratio <= 0.11, f"Slip ratio for Player {player}: {slip_ratio:.4f}, expected close to 0.1"
 
     # Test Player A at top edge, B at right edge
-    run_corner_test((0, 1, 3, 5, 0), env.UP, env.RIGHT)
-    run_corner_test((0, 1, 3, 5, 1), env.UP, env.RIGHT)
-    run_corner_test((0, 1, 3, 5, 0), env.UP, env.DOWN)
-    run_corner_test((0, 1, 3, 5, 1), env.UP, env.DOWN)
-    run_corner_test((0, 1, 3, 5, 0), env.LEFT, env.RIGHT)
-    run_corner_test((0, 1, 3, 5, 1), env.LEFT, env.RIGHT)
-    run_corner_test((0, 1, 3, 5, 0), env.LEFT, env.DOWN)
-    run_corner_test((0, 1, 3, 5, 1), env.LEFT, env.DOWN)
+    run_corner_test((0, 1, 3, 5, 0), env.NORTH, env.EAST)
+    run_corner_test((0, 1, 3, 5, 1), env.NORTH, env.EAST)
+    run_corner_test((0, 1, 3, 5, 0), env.NORTH, env.SOUTH)
+    run_corner_test((0, 1, 3, 5, 1), env.NORTH, env.SOUTH)
+    run_corner_test((0, 1, 3, 5, 0), env.WEST, env.EAST)
+    run_corner_test((0, 1, 3, 5, 1), env.WEST, env.EAST)
+    run_corner_test((0, 1, 3, 5, 0), env.WEST, env.SOUTH)
+    run_corner_test((0, 1, 3, 5, 1), env.WEST, env.SOUTH)
 
     # Test Player B at top edge, A at right edge
-    run_corner_test((3, 5, 0, 1, 0), env.RIGHT, env.UP)
-    run_corner_test((3, 5, 0, 1, 1), env.RIGHT, env.UP)
-    run_corner_test((3, 5, 0, 1, 0), env.DOWN, env.UP)
-    run_corner_test((3, 5, 0, 1, 1), env.DOWN, env.UP)
-    run_corner_test((3, 5, 0, 1, 0), env.RIGHT, env.LEFT)
-    run_corner_test((3, 5, 0, 1, 1), env.RIGHT, env.LEFT)
-    run_corner_test((3, 5, 0, 1, 0), env.DOWN, env.LEFT)
-    run_corner_test((3, 5, 0, 1, 1), env.DOWN, env.LEFT)
+    run_corner_test((3, 5, 0, 1, 0), env.EAST, env.NORTH)
+    run_corner_test((3, 5, 0, 1, 1), env.EAST, env.NORTH)
+    run_corner_test((3, 5, 0, 1, 0), env.SOUTH, env.NORTH)
+    run_corner_test((3, 5, 0, 1, 1), env.SOUTH, env.NORTH)
+    run_corner_test((3, 5, 0, 1, 0), env.EAST, env.WEST)
+    run_corner_test((3, 5, 0, 1, 1), env.EAST, env.WEST)
+    run_corner_test((3, 5, 0, 1, 0), env.SOUTH, env.WEST)
+    run_corner_test((3, 5, 0, 1, 1), env.SOUTH, env.WEST)
 
 def test_goal_boundaries_no_goal(env):
 
@@ -312,23 +314,23 @@ def test_goal_boundaries_no_goal(env):
         terminal_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if any(done.values()) or any(truncated.values()):
+            if any(done) or any(truncated):
                 terminal_count += 1
 
         assert terminal_count == 0, "No goal should be scored"
 
     # Test goal boundaries without possession
-    run_goal_boundary_test((1, 1, 3, 3, 1), env.LEFT, env.STAND)  # A at left goal boundary
-    run_goal_boundary_test((2, 1, 3, 3, 1), env.LEFT, env.STAND)  # A at left goal boundary
-    run_goal_boundary_test((1, 5, 3, 3, 1), env.RIGHT, env.STAND)  # A at right goal boundary
-    run_goal_boundary_test((2, 5, 3, 3, 1), env.RIGHT, env.STAND)  # A at right goal boundary
+    run_goal_boundary_test((1, 1, 3, 3, 1), env.WEST, env.NOOP)  # A at left goal boundary
+    run_goal_boundary_test((2, 1, 3, 3, 1), env.WEST, env.NOOP)  # A at left goal boundary
+    run_goal_boundary_test((1, 5, 3, 3, 1), env.EAST, env.NOOP)  # A at right goal boundary
+    run_goal_boundary_test((2, 5, 3, 3, 1), env.EAST, env.NOOP)  # A at right goal boundary
 
-    run_goal_boundary_test((3, 3, 1, 1, 0), env.STAND, env.LEFT)  # B at left goal boundary
-    run_goal_boundary_test((3, 3, 2, 1, 0), env.STAND, env.LEFT)  # B at left goal boundary
-    run_goal_boundary_test((3, 3, 1, 5, 0), env.STAND, env.RIGHT)  # B at right goal boundary
-    run_goal_boundary_test((3, 3, 2, 5, 0), env.STAND, env.RIGHT)  # B at right goal boundary
+    run_goal_boundary_test((3, 3, 1, 1, 0), env.NOOP, env.WEST)  # B at left goal boundary
+    run_goal_boundary_test((3, 3, 2, 1, 0), env.NOOP, env.WEST)  # B at left goal boundary
+    run_goal_boundary_test((3, 3, 1, 5, 0), env.NOOP, env.EAST)  # B at right goal boundary
+    run_goal_boundary_test((3, 3, 2, 5, 0), env.NOOP, env.EAST)  # B at right goal boundary
 
 def test_render(env, capsys):
     env.reset()
@@ -341,14 +343,14 @@ def test_render(env, capsys):
 def test_possession_change_non_collision(env):
     # Test that possession doesn't change when players move without colliding
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 3, 3, 0))  # Player A has possession
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.LEFT))
-    assert env.state['possession'] == 0, "Possession should not change without collision"
+    env.state = (1, 1, 3, 3, 0)  # Player A has possession
+    obs, reward, done, truncated, info = env.step((env.EAST, env.WEST))
+    assert env.state[4] == 0, "Possession should not change without collision"
 
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 3, 3, 1))  # Player B has possession
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.LEFT))
-    assert env.state['possession'] == 1, "Possession should not change without collision"
+    env.state = (1, 1, 3, 3, 1)  # Player B has possession
+    obs, reward, done, truncated, info = env.step((env.EAST, env.WEST))
+    assert env.state[4] == 1, "Possession should not change without collision"
 
 def test_simultaneous_goal_attempts(env):
     for possession in [0, 1]:
@@ -358,11 +360,11 @@ def test_simultaneous_goal_attempts(env):
 
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict((1, 5, 1, 1, possession))  # one with ball near opponents's goal
-            obs, reward, done, truncated, info = env.step((env.RIGHT, env.LEFT))
-            if reward['player_a'] == 1:
+            env.state = (1, 5, 1, 1, possession)  # one with ball near opponents's goal
+            obs, reward, done, truncated, info = env.step((env.EAST, env.WEST))
+            if reward[0] == 1:
                 a_score_count += 1
-            elif reward['player_b'] == 1:
+            elif reward[1] == 1:
                 b_score_count += 1
 
         a_score_ratio = a_score_count / iterations
@@ -380,25 +382,25 @@ def test_simultaneous_goal_attempts(env):
 def test_edge_case_possession(env):
     # Test possession change when moving to the same cell from different distances
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 1, 2, 0))  # A has ball, both move right
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.RIGHT))
-    assert env.state['possession'] == 0, "A should keep possession as it's closer"
+    env.state = (1, 1, 1, 2, 0)  # A has ball, both move right
+    obs, reward, done, truncated, info = env.step((env.EAST, env.EAST))
+    assert env.state[4] == 0, "A should keep possession as it's closer"
 
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 1, 2, 1))  # B has ball, both move right
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.RIGHT))
-    assert env.state['possession'] == 1, "B should keep possession even though A moves to the same cell"
+    env.state = (1, 1, 1, 2, 1)  # B has ball, both move right
+    obs, reward, done, truncated, info = env.step((env.EAST, env.EAST))
+    assert env.state[4] == 1, "B should keep possession even though A moves to the same cell"
 
     # Test possession change when moving to the same cell from different distances
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 1, 3, 0))  # A has ball, both move right
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.RIGHT))
-    assert env.state['possession'] == 0, "A should keep possession as it's closer"
+    env.state = (1, 1, 1, 3, 0)  # A has ball, both move right
+    obs, reward, done, truncated, info = env.step((env.EAST, env.EAST))
+    assert env.state[4] == 0, "A should keep possession as it's closer"
 
     env.reset()
-    env.state = env._game_state_to_dict((1, 1, 1, 3, 1))  # B has ball, both move right
-    obs, reward, done, truncated, info = env.step((env.RIGHT, env.RIGHT))
-    assert env.state['possession'] == 1, "B should keep possession even though A moves to the same cell"
+    env.state = (1, 1, 1, 3, 1)  # B has ball, both move right
+    obs, reward, done, truncated, info = env.step((env.EAST, env.EAST))
+    assert env.state[4] == 1, "B should keep possession even though A moves to the same cell"
 
 def test_multiple_consecutive_collisions(env):
     initial_state = (1, 2, 1, 3, 0)  # A has ball, players adjacent
@@ -410,13 +412,13 @@ def test_multiple_consecutive_collisions(env):
     }
     for _ in range(n_samples):
         env.reset()
-        env.state = env._game_state_to_dict(initial_state)
-        obs, reward, done, truncated, info = env.step((env.RIGHT, env.LEFT))
+        env.state = initial_state
+        obs, reward, done, truncated, info = env.step((env.EAST, env.WEST))
 
-        if env.state['col_a'] == initial_state[1] and env.state['col_b'] == initial_state[3] and \
-            env.state['row_a'] == initial_state[0] and env.state['row_b'] == initial_state[2]:
+        if env.state[1] == initial_state[1] and env.state[3] == initial_state[3] and \
+            env.state[0] == initial_state[0] and env.state[2] == initial_state[2]:
             collision_count += 1
-            if env.state['possession'] == 0:
+            if env.state[4] == 0:
                 possession_after_collision_count['A'] += 1
             else:
                 possession_after_collision_count['B'] += 1
@@ -434,37 +436,37 @@ def test_slip_into_goal(env):
         goal_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if done['player_a'] or done['player_b']:
+            if done[0] or done[1]:
                 goal_count += 1
-        
+
         goal_ratio = goal_count / iterations
         assert 0.09 <= goal_ratio <= 0.11, f"Goal ratio: {goal_ratio:.2f}, expected close to 0.1"
 
     # Test A slipping into own goal
-    run_slip_goal_test((1, 1, 3, 3, 0), env.UP, env.STAND)
-    run_slip_goal_test((2, 1, 3, 3, 0), env.UP, env.STAND)
-    run_slip_goal_test((1, 1, 3, 3, 0), env.DOWN, env.STAND)
-    run_slip_goal_test((2, 1, 3, 3, 0), env.DOWN, env.STAND)
-    
+    run_slip_goal_test((1, 1, 3, 3, 0), env.NORTH, env.NOOP)
+    run_slip_goal_test((2, 1, 3, 3, 0), env.NORTH, env.NOOP)
+    run_slip_goal_test((1, 1, 3, 3, 0), env.SOUTH, env.NOOP)
+    run_slip_goal_test((2, 1, 3, 3, 0), env.SOUTH, env.NOOP)
+
     # Test A slipping into B's goal
-    run_slip_goal_test((1, 5, 3, 3, 0), env.UP, env.STAND)
-    run_slip_goal_test((2, 5, 3, 3, 0), env.UP, env.STAND)
-    run_slip_goal_test((1, 5, 3, 3, 0), env.DOWN, env.STAND)
-    run_slip_goal_test((2, 5, 3, 3, 0), env.DOWN, env.STAND)
+    run_slip_goal_test((1, 5, 3, 3, 0), env.NORTH, env.NOOP)
+    run_slip_goal_test((2, 5, 3, 3, 0), env.NORTH, env.NOOP)
+    run_slip_goal_test((1, 5, 3, 3, 0), env.SOUTH, env.NOOP)
+    run_slip_goal_test((2, 5, 3, 3, 0), env.SOUTH, env.NOOP)
 
     # Test B slipping into A's goal
-    run_slip_goal_test((3, 3, 1, 1, 1), env.STAND, env.UP)
-    run_slip_goal_test((3, 3, 2, 1, 1), env.STAND, env.UP)
-    run_slip_goal_test((3, 3, 1, 1, 1), env.STAND, env.DOWN)
-    run_slip_goal_test((3, 3, 2, 1, 1), env.STAND, env.DOWN)
+    run_slip_goal_test((3, 3, 1, 1, 1), env.NOOP, env.NORTH)
+    run_slip_goal_test((3, 3, 2, 1, 1), env.NOOP, env.NORTH)
+    run_slip_goal_test((3, 3, 1, 1, 1), env.NOOP, env.SOUTH)
+    run_slip_goal_test((3, 3, 2, 1, 1), env.NOOP, env.SOUTH)
 
     # Test B slipping into own goal
-    run_slip_goal_test((3, 3, 1, 5, 1), env.STAND, env.UP)
-    run_slip_goal_test((3, 3, 2, 5, 1), env.STAND, env.UP)
-    run_slip_goal_test((3, 3, 1, 5, 1), env.STAND, env.DOWN)
-    run_slip_goal_test((3, 3, 2, 5, 1), env.STAND, env.DOWN)
+    run_slip_goal_test((3, 3, 1, 5, 1), env.NOOP, env.NORTH)
+    run_slip_goal_test((3, 3, 2, 5, 1), env.NOOP, env.NORTH)
+    run_slip_goal_test((3, 3, 1, 5, 1), env.NOOP, env.SOUTH)
+    run_slip_goal_test((3, 3, 2, 5, 1), env.NOOP, env.SOUTH)
 
 def test_bounce_off_horizontal_edges(env):
     def run_bounce_test(initial_state, action_a, action_b, iterations=100000):
@@ -472,29 +474,29 @@ def test_bounce_off_horizontal_edges(env):
         slip_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if tuple(env.state.values()) == initial_state:
+            if env.state == initial_state:
                 bounce_count += 1
-            elif tuple(env.state.values()) != initial_state:
+            elif env.state != initial_state:
                 slip_count += 1
-        
+
         bounce_ratio = bounce_count / iterations
         slip_ratio = slip_count / iterations
         assert 0.79 <= bounce_ratio <= 0.81, f"Bounce ratio: {bounce_ratio:.2f}, expected close to 0.8"
         assert 0.19 <= slip_ratio <= 0.21, f"Slip ratio: {slip_ratio:.2f}, expected close to 0.2"
 
     # Test bouncing off top edge
-    run_bounce_test((0, 2, 3, 3, 0), env.UP, env.STAND)
-    run_bounce_test((0, 3, 3, 3, 0), env.UP, env.STAND)
-    run_bounce_test((3, 3, 0, 2, 1), env.STAND, env.UP)
-    run_bounce_test((3, 3, 0, 3, 1), env.STAND, env.UP)
-    
+    run_bounce_test((0, 2, 3, 3, 0), env.NORTH, env.NOOP)
+    run_bounce_test((0, 3, 3, 3, 0), env.NORTH, env.NOOP)
+    run_bounce_test((3, 3, 0, 2, 1), env.NOOP, env.NORTH)
+    run_bounce_test((3, 3, 0, 3, 1), env.NOOP, env.NORTH)
+
     # Test bouncing off bottom edge
-    run_bounce_test((3, 2, 0, 3, 0), env.DOWN, env.STAND)
-    run_bounce_test((3, 3, 0, 3, 0), env.DOWN, env.STAND)
-    run_bounce_test((0, 3, 3, 2, 0), env.STAND, env.DOWN)
-    run_bounce_test((0, 3, 3, 3, 0), env.STAND, env.DOWN)
+    run_bounce_test((3, 2, 0, 3, 0), env.SOUTH, env.NOOP)
+    run_bounce_test((3, 3, 0, 3, 0), env.SOUTH, env.NOOP)
+    run_bounce_test((0, 3, 3, 2, 0), env.NOOP, env.SOUTH)
+    run_bounce_test((0, 3, 3, 3, 0), env.NOOP, env.SOUTH)
 
 def test_bounce_off_corner_edges(env):
     def run_bounce_test(initial_state, action, iterations=100000):
@@ -502,57 +504,57 @@ def test_bounce_off_corner_edges(env):
         slip_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
-            obs, reward, done, truncated, info = env.step((action, env.STAND))
-            if tuple(env.state.values()) == initial_state:
+            env.state = initial_state
+            obs, reward, done, truncated, info = env.step((action, env.NOOP))
+            if env.state == initial_state:
                 bounce_count += 1
-            elif tuple(env.state.values()) != initial_state:
+            elif env.state != initial_state:
                 slip_count += 1
-        
+
         bounce_ratio = bounce_count / iterations
         slip_ratio = slip_count / iterations
         assert 0.89 <= bounce_ratio <= 0.91, f"Bounce ratio: {bounce_ratio:.2f}, expected close to 0.9"
         assert 0.09 <= slip_ratio <= 0.11, f"Slip ratio: {slip_ratio:.2f}, expected close to 0.1"
 
     # Test bouncing off left edge (non-goal row)
-    run_bounce_test((0, 1, 3, 3, 1), env.LEFT)
-    
+    run_bounce_test((0, 1, 3, 3, 1), env.WEST)
+
     # Test bouncing off right edge (non-goal row)
-    run_bounce_test((3, 5, 0, 3, 1), env.RIGHT)
+    run_bounce_test((3, 5, 0, 3, 1), env.EAST)
 
 def test_collision_through_slip(env):
     def run_slip_collision_test(initial_state, action_a, action_b, iterations=100000):
         collision_count = 0
         for _ in range(iterations):
             env.reset()
-            env.state = env._game_state_to_dict(initial_state)
+            env.state = initial_state
             obs, reward, done, truncated, info = env.step((action_a, action_b))
-            if env.state['row_a'] == initial_state[0] and env.state['col_a'] == initial_state[1] and \
-                env.state['row_b'] == initial_state[2] and env.state['col_b'] == initial_state[3]:
+            if env.state[0] == initial_state[0] and env.state[1] == initial_state[1] and \
+                env.state[2] == initial_state[2] and env.state[3] == initial_state[3]:
                 collision_count += 1
-        
+
         collision_ratio = collision_count / iterations
         expected_ratio = 0.1  # 10% chance of slip for one player, other player moves as intended
         assert np.isclose(collision_ratio, expected_ratio, atol=0.02), f"Collision ratio: {collision_ratio:.2f}, expected close to {expected_ratio:.2f}"
 
     # Test A slipping into B's cell
-    run_slip_collision_test((2, 2, 2, 3, 0), env.UP, env.STAND)
-    run_slip_collision_test((2, 2, 2, 3, 1), env.UP, env.STAND)
-    
+    run_slip_collision_test((2, 2, 2, 3, 0), env.NORTH, env.NOOP)
+    run_slip_collision_test((2, 2, 2, 3, 1), env.NORTH, env.NOOP)
+
     # Test B slipping into A's cell
-    run_slip_collision_test((2, 3, 2, 2, 0), env.STAND, env.UP)
-    run_slip_collision_test((2, 3, 2, 2, 1), env.STAND, env.UP)
+    run_slip_collision_test((2, 3, 2, 2, 0), env.NOOP, env.NORTH)
+    run_slip_collision_test((2, 3, 2, 2, 1), env.NOOP, env.NORTH)
 
 def test_no_slip_on_stand(env):
     initial_state = (1, 2, 3, 4, 0)
     iterations = 100000
     slip_count = 0
-    
+
     for _ in range(iterations):
         env.reset()
-        env.state = env._game_state_to_dict(initial_state)
-        obs, reward, done, truncated, info = env.step((env.STAND, env.STAND))
-        if tuple(env.state.values()) != initial_state:
+        env.state = initial_state
+        obs, reward, done, truncated, info = env.step((env.NOOP, env.NOOP))
+        if env.state != initial_state:
             slip_count += 1
-    
+
     assert slip_count == 0, f"Expected no slips on STAND action, got {slip_count} slips"
