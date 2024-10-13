@@ -1,17 +1,17 @@
-# gym-walk
+# gym-soccer-littman94
 
 ## Installation
 
 ```bash
-git clone https://github.com/mimoralea/gym-walk.git
-cd gym-walk
+git clone https://github.com/mimoralea/gym-soccer-littman94.git
+cd gym-soccer-littman94
 pip install .
 ```
 
 or:
 
 ```bash
-pip install git+https://github.com/mimoralea/gym-walk#egg=gym-walk
+pip install git+https://github.com/mimoralea/gym-soccer-littman94#egg=gym-soccer-littman94
 ```
 
 ## Use

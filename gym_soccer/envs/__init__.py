@@ -1,0 +1,1 @@
+from gym_soccer.envs.soccer_simultaneous_env import SoccerSimultaneousEnv
