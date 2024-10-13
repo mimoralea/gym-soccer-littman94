@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='gym_soccer',
@@ -7,7 +7,10 @@ setup(
     url='https://github.com/mimoralea/gym-soccer-littman94',
     author='Miguel Morales',
     author_email='mimoralea@gmail.com',
-    packages=['gym_soccer', 'gym_soccer.envs'],
+    packages=find_packages(),  # Automatically find and include packages in the directory
     license='MIT License',
-    install_requires=['gymnasium', 'pettingzoo'],
+    install_requires=[
+        'numpy==1.26.4',
+        'gym>=0.26.2'
+    ],
 )
