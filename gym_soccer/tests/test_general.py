@@ -11,18 +11,17 @@ from gym_soccer.envs.soccer_simultaneous_env import SoccerSimultaneousEnv
 ])
 def test_initial_state_distribution(width, height):
     env = SoccerSimultaneousEnv(width=width, height=height)
-    isd = env._generate_isd()
 
     # Check that the total probability sums to 1
-    total_prob = sum(prob for prob, _ in isd)
+    total_prob = sum(prob for prob, _ in env.isd)
     assert abs(total_prob - 1.0) < 1e-6, f"Total probability should be 1, but is {total_prob}"
 
     # Check that all probabilities are equal
-    first_prob = isd[0][0]
-    assert all(abs(prob - first_prob) < 1e-6 for prob, _ in isd), "All probabilities should be equal"
+    first_prob = env.isd[0][0]
+    assert all(abs(prob - first_prob) < 1e-6 for prob, _ in env.isd), "All probabilities should be equal"
 
     # Check starting positions
-    for _, state in isd:
+    for _, state in env.isd:
         row_a, col_a, row_b, col_b, possession = state
 
         # Check columns
@@ -50,7 +49,7 @@ def test_initial_state_distribution(width, height):
     else:
         expected_states = 2  # One middle row, two possession states
 
-    assert len(isd) == expected_states, f"Expected {expected_states} initial states, but got {len(isd)}"
+    assert len(env.isd) == expected_states, f"Expected {expected_states} initial states, but got {len(env.isd)}"
 
 
 @pytest.mark.parametrize("width,height", [
@@ -133,27 +132,43 @@ def test_singleagent_a():
     env = SoccerSimultaneousEnv(width=width, height=height, slip_prob=slip_prob, player_a_policy=None, player_b_policy=random_policy)
     assert not env.multiagent, "Environment should not be multiagent, one policy was provided."
 
-    # Check that the observation space is Discrete
-    assert isinstance(env.observation_space, spaces.Discrete), "Observation space should be Discrete."
-    assert env.observation_space.n == n_states, "Observation space should have the correct number of states."
+    # Check that the observation space is Dict
+    assert isinstance(env.observation_space, spaces.Dict), "Observation space should be a dictionary."
+    assert env.observation_space['player_a'].n == n_states, "Observation space should have the correct number of states."
+    assert 'player_b' not in env.observation_space, "Observation space should not contain player_b."
 
-    # Check that the action space is Discrete
-    assert isinstance(env.action_space, spaces.Discrete), "Action space should be Discrete."
-    assert env.action_space.n == n_actions, "Action space should have the correct number of actions."
-
+    # Check that the action space is Dict
+    assert isinstance(env.action_space, spaces.Dict), "Action space should be a dictionary."
+    assert env.action_space['player_a'].n == n_actions, "Action space should have the correct number of actions."
+    assert 'player_b' not in env.action_space, "Action space should not contain player_b."
+    
     obs, info = env.reset()
-    assert isinstance(obs, int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs < n_states, "Observation should be a state index."
+    assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
+    assert 'player_a' in obs, "Observation should contain player_a."
+    assert 'player_b' not in obs, "Observation should not contain player_b."
+    assert 0 <= obs['player_a'] < n_states, "Observation should be a state index."
     assert isinstance(info, dict), "Info should be a dictionary."
+    assert 'player_a' in info, "Info should contain player_a."
+    assert 'player_b' not in info, "Info should not contain player_b."
 
     random_action = np.random.randint(0, n_actions)
-    obs, reward, terminated, truncated, info = env.step(random_action)
-    assert isinstance(obs, int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs < n_states, "Observation should be a state index."
-    assert isinstance(reward, float), "Reward should be a float."
-    assert isinstance(terminated, bool), "Terminated should be a boolean."
-    assert isinstance(truncated, bool), "Truncated should be a boolean."
+    obs, reward, terminated, truncated, info = env.step({'player_a': random_action})
+    assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
+    assert 'player_a' in obs, "Observation should contain player_a."
+    assert 'player_b' not in obs, "Observation should not contain player_b."
+    assert 0 <= obs['player_a'] < n_states, "Observation should be a state index."
+    assert isinstance(reward, dict), "Reward should be a dictionary."
+    assert 'player_a' in reward, "Reward should contain player_a."
+    assert 'player_b' not in reward, "Reward should not contain player_b."
+    assert isinstance(terminated, dict), "Terminated should be a dictionary."
+    assert 'player_a' in terminated, "Terminated should contain player_a."
+    assert 'player_b' not in terminated, "Terminated should not contain player_b."
+    assert isinstance(truncated, dict), "Truncated should be a dictionary."
+    assert 'player_a' in truncated, "Truncated should contain player_a."
+    assert 'player_b' not in truncated, "Truncated should not contain player_b."
     assert isinstance(info, dict), "Info should be a dictionary."
+    assert 'player_a' in info, "Info should contain player_a."
+    assert 'player_b' not in info, "Info should not contain player_b."
 
 def test_singleagent_b():
     from gym import spaces
@@ -166,30 +181,46 @@ def test_singleagent_b():
     for s in range(n_states):
         random_policy[s] = np.random.randint(0, n_actions)
 
-    env = SoccerSimultaneousEnv(width=width, height=height, slip_prob=slip_prob, player_a_policy=None, player_b_policy=random_policy)
+    env = SoccerSimultaneousEnv(width=width, height=height, slip_prob=slip_prob, player_a_policy=random_policy, player_b_policy=None)
     assert not env.multiagent, "Environment should not be multiagent, one policy was provided."
 
-    # Check that the observation space is Discrete
-    assert isinstance(env.observation_space, spaces.Discrete), "Observation space should be Discrete."
-    assert env.observation_space.n == n_states, "Observation space should have the correct number of states."
+    # Check that the observation space is Dict
+    assert isinstance(env.observation_space, spaces.Dict), "Observation space should be a dictionary."
+    assert env.observation_space['player_b'].n == n_states, "Observation space should have the correct number of states."
+    assert 'player_a' not in env.observation_space, "Observation space should not contain player_a."
 
-    # Check that the action space is Discrete
-    assert isinstance(env.action_space, spaces.Discrete), "Action space should be Discrete."
-    assert env.action_space.n == n_actions, "Action space should have the correct number of actions."
-
+    # Check that the action space is Dict
+    assert isinstance(env.action_space, spaces.Dict), "Action space should be a dictionary."
+    assert env.action_space['player_b'].n == n_actions, "Action space should have the correct number of actions."
+    assert 'player_a' not in env.action_space, "Action space should not contain player_a."
+    
     obs, info = env.reset()
-    assert isinstance(obs, int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs < n_states, "Observation should be a state index."
+    assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
+    assert 'player_b' in obs, "Observation should contain player_b."
+    assert 'player_a' not in obs, "Observation should not contain player_a."
+    assert 0 <= obs['player_b'] < n_states, "Observation should be a state index."
     assert isinstance(info, dict), "Info should be a dictionary."
+    assert 'player_b' in info, "Info should contain player_b."
+    assert 'player_a' not in info, "Info should not contain player_a."
 
     random_action = np.random.randint(0, n_actions)
-    obs, reward, terminated, truncated, info = env.step(random_action)
-    assert isinstance(obs, int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs < n_states, "Observation should be a state index."
-    assert isinstance(reward, float), "Reward should be a float."
-    assert isinstance(terminated, bool), "Terminated should be a boolean."
-    assert isinstance(truncated, bool), "Truncated should be a boolean."
+    obs, reward, terminated, truncated, info = env.step({'player_b': random_action})
+    assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
+    assert 'player_b' in obs, "Observation should contain player_b."
+    assert 'player_a' not in obs, "Observation should not contain player_a."
+    assert 0 <= obs['player_b'] < n_states, "Observation should be a state index."
+    assert isinstance(reward, dict), "Reward should be a dictionary."
+    assert 'player_b' in reward, "Reward should contain player_b."
+    assert 'player_a' not in reward, "Reward should not contain player_a."
+    assert isinstance(terminated, dict), "Terminated should be a dictionary."
+    assert 'player_b' in terminated, "Terminated should contain player_b."
+    assert 'player_a' not in terminated, "Terminated should not contain player_a."
+    assert isinstance(truncated, dict), "Truncated should be a dictionary."
+    assert 'player_b' in truncated, "Truncated should contain player_b."
+    assert 'player_a' not in truncated, "Truncated should not contain player_a."
     assert isinstance(info, dict), "Info should be a dictionary."
+    assert 'player_b' in info, "Info should contain player_b."
+    assert 'player_a' not in info, "Info should not contain player_a."
 
 def test_multiagent():
     from gym import spaces
@@ -202,51 +233,32 @@ def test_multiagent():
     env = SoccerSimultaneousEnv(width=width, height=height, slip_prob=slip_prob, player_a_policy=None, player_b_policy=None)
     assert env.multiagent, "Environment should be multiagent, no policies were provided."
 
-    # Check that the observation space is Discrete
-    assert isinstance(env.observation_space, spaces.Tuple), "Observation space should be Tuple."
-    assert isinstance(env.observation_space[0], spaces.Discrete), "Observation space should be Discrete."
-    assert isinstance(env.observation_space[1], spaces.Discrete), "Observation space should be Discrete."
-    assert len(env.observation_space) == 2, "Observation space should have the correct number of states."
+    # Check that the observation space is Dict
+    assert isinstance(env.observation_space, spaces.Dict), "Observation space should be a dictionary."
+    assert env.observation_space['player_a'].n == n_states, "Observation space should have the correct number of states for player_a."
+    assert env.observation_space['player_b'].n == n_states, "Observation space should have the correct number of states for player_b."
 
-    # Check that the action space is Discrete
-    assert isinstance(env.action_space, spaces.Tuple), "Action space should be Tuple."
-    assert isinstance(env.action_space[0], spaces.Discrete), "Action space should be Discrete."
-    assert isinstance(env.action_space[1], spaces.Discrete), "Action space should be Discrete."
-    assert len(env.action_space) == 2, "Action space should have the correct number of actions."
+    # Check that the action space is Dict
+    assert isinstance(env.action_space, spaces.Dict), "Action space should be a dictionary."
+    assert env.action_space['player_a'].n == n_actions, "Action space should have the correct number of actions for player_a."
+    assert env.action_space['player_b'].n == n_actions, "Action space should have the correct number of actions for player_b."
 
     obs, info = env.reset()
-    assert isinstance(obs, tuple), "Observation should be a tuple, multiagent mode."
-    assert len(obs) == 2, "Observation should be a tuple of length 2, multiagent mode."
-    assert isinstance(obs[0], int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs[0] < n_states, "Observation should be a state index."
-    assert isinstance(obs[1], int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs[1] < n_states, "Observation should be a state index."
-    assert isinstance(info, tuple), "Info should be a tuple."
-    assert len(info) == 2, "Info should be a tuple of length 2."
-    assert isinstance(info[0], dict), "Info should be a dictionary."
-    assert isinstance(info[1], dict), "Info should be a dictionary."
+    assert isinstance(obs, dict), "Observation should be a dictionary, multiagent mode."
+    assert 'player_a' in obs and 'player_b' in obs, "Observation should contain both player_a and player_b."
+    assert 0 <= obs['player_a'] < n_states and 0 <= obs['player_b'] < n_states, "Observations should be state indices."
+    assert isinstance(info, dict), "Info should be a dictionary."
+    assert 'player_a' in info and 'player_b' in info, "Info should contain both player_a and player_b."
 
     random_action_a = np.random.randint(0, n_actions)
     random_action_b = np.random.randint(0, n_actions)
-    obs, reward, terminated, truncated, info = env.step((random_action_a, random_action_b))
-    assert isinstance(obs, tuple), "Observation should be a tuple, multiagent mode."
-    assert len(obs) == 2, "Observation should be a tuple of length 2, multiagent mode."
-    assert isinstance(obs[0], int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs[0] < n_states, "Observation should be a state index."
-    assert isinstance(obs[1], int), "Observation should be an integer, single agent mode."
-    assert 0 <= obs[1] < n_states, "Observation should be a state index."
-    assert isinstance(reward, tuple), "Reward should be a tuple."
-    assert len(reward) == 2, "Reward should be a tuple of length 2."
-    assert isinstance(reward[0], float), "Reward should be a float."
-    assert isinstance(reward[1], float), "Reward should be a float."
-    assert isinstance(terminated, tuple), "Terminated should be a tuple."
-    assert len(terminated) == 2, "Terminated should be a tuple of length 2."
-    assert isinstance(terminated[0], bool), "Terminated should be a boolean."
-    assert isinstance(terminated[1], bool), "Terminated should be a boolean."
-    assert isinstance(truncated, tuple), "Truncated should be a tuple."
-    assert len(truncated) == 2, "Truncated should be a tuple of length 2."
-    assert isinstance(truncated[0], bool), "Truncated should be a boolean."
-    assert isinstance(truncated[1], bool), "Truncated should be a boolean."
-    assert isinstance(info, tuple), "Info should be a tuple."
-    assert len(info) == 2, "Info should be a tuple of length 2."
-    assert isinstance(info[0], dict), "Info should be a dictionary."
+    obs, reward, terminated, truncated, info = env.step({'player_a': random_action_a, 'player_b': random_action_b})
+    assert isinstance(obs, dict), "Observation should be a dictionary, multiagent mode."
+    assert 'player_a' in obs and 'player_b' in obs, "Observation should contain both player_a and player_b."
+    assert 0 <= obs['player_a'] < n_states and 0 <= obs['player_b'] < n_states, "Observations should be state indices."
+    assert isinstance(reward, dict), "Reward should be a dictionary."
+    assert 'player_a' in reward and 'player_b' in reward, "Reward should contain both player_a and player_b."
+    assert isinstance(reward['player_a'], float) and isinstance(reward['player_b'], float), "Rewards should be floats."
+    assert isinstance(terminated, dict) and isinstance(terminated['player_a'], bool) and isinstance(terminated['player_b'], bool), "Terminated should be a dictionary with boolean values."
+    assert isinstance(truncated, dict) and isinstance(truncated['player_a'], bool) and isinstance(truncated['player_b'], bool), "Truncated should be a dictionary with boolean values."
+    assert isinstance(info, dict) and 'player_a' in info and 'player_b' in info, "Info should be a dictionary with both player_a and player_b."

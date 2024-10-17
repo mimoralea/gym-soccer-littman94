@@ -50,6 +50,8 @@ class SoccerSimultaneousEnv:
         self.player_a_policy = player_a_policy
         self.player_b_policy = player_b_policy
         self.multiagent = player_a_policy is None and player_b_policy is None
+        self.return_agent = ['player_a', 'player_b'] if self.multiagent else ['player_a'] \
+            if player_a_policy is None else ['player_b']
         self.np_random = np.random.RandomState()
 
         self.goal_rows = ((self.height - 1) // 2, self.height // 2) if self.height % 2 == 0 else (self.height // 2 - 1, self.height // 2, self.height // 2 + 1)
@@ -115,8 +117,12 @@ class SoccerSimultaneousEnv:
         #     pickle.dump(self.player_b_policy, f)
 
         # Update observation space to be Discrete
-        self.observation_space = spaces.Tuple((spaces.Discrete(self.n_states), spaces.Discrete(self.n_states))) if self.multiagent else spaces.Discrete(self.n_states)
-        self.action_space = spaces.Tuple((spaces.Discrete(self.n_actions), spaces.Discrete(self.n_actions))) if self.multiagent else spaces.Discrete(self.n_actions)
+        self.observation_space = spaces.Dict({
+            a: spaces.Discrete(self.n_states) for a in self.return_agent
+        })
+        self.action_space = spaces.Dict({
+            a: spaces.Discrete(self.n_actions) for a in self.return_agent
+        })
 
         # Define the initial state distribution
         self.isd = self._generate_isd()
@@ -336,23 +342,33 @@ class SoccerSimultaneousEnv:
 
     def step(self, action):
         assert not self.needs_reset, "Please reset the environment before taking a step"
+        assert isinstance(action, dict), "Action must be a dictionary"
+        assert len(action) == 1 or len(action) == 2, "Action must be a dictionary of length 1 or 2"
+        assert self.multiagent or self.player_a_policy is not None or self.player_b_policy is not None, "Multiagent environment or policy for one player must be provided"
+        assert self.player_a_policy is not None or 'player_a' in action, "A policy for player_a must be provided"
+        assert self.player_b_policy is not None or 'player_b' in action, "A policy for player_b must be provided"
 
+        only_agent = None
         if self.multiagent:
-            assert (isinstance(action, tuple) and len(action) == 2), "Action must be a tuple of length 2 for multiagent case"
+            assert (isinstance(action, dict) and len(action) == 2), "Action must be a dictionary of length 2 for multiagent case"
+            assert 'player_a' in action and 'player_b' in action, "Action must contain both 'player_a' and 'player_b'"
         else:
-            assert isinstance(action, int), "Action must be an integer for single agent case"
-
-        action_readable = self.ACTION_STRING[action] if not self.multiagent else (self.ACTION_STRING[action[0]], self.ACTION_STRING[action[1]])
+            assert (isinstance(action, dict) and len(action) == 1), "Action must be a dictionary of length 1 for single agent case"
+            assert 'player_a' in action or 'player_b' in action, "Action must contain either 'player_a' or 'player_b'"
+            assert not ('player_a' in action and 'player_b' in action), "Action must contain only one of 'player_a' or 'player_b'"
+            only_agent = 'player_a' if self.player_a_policy is None else 'player_b'
+    
+        action_readable = (self.ACTION_STRING[action['player_a']], self.ACTION_STRING[action['player_b']]) if self.multiagent else self.ACTION_STRING[action[only_agent]]
         transitions = self.P_readable[self.state][action_readable]
         i = categorical_sample([t[0] for t in transitions], self.np_random)
         prob, self.state, reward, done = transitions[i]
-        self.observations = (self.state_space[self.state], self.state_space[self.state]) if self.multiagent else self.state_space[self.state]
+        self.observations = {a: self.state_space[self.state] for a in self.return_agent}
         self.lastaction = action
-        rewards = (reward, -reward) if self.multiagent else reward
-        dones = (done, done) if self.multiagent else done
-        truncateds = (False, False) if self.multiagent else False
-        infos = ({"p": prob}, {"p": prob}) if self.multiagent else {"p": prob}
-        self.needs_reset = done or (any(truncateds) if self.multiagent else truncateds)
+        rewards = {a: reward * (1 if 'player_a' in a else -1) for a in self.return_agent}
+        dones = {a: done for a in self.return_agent}
+        truncateds = {a: False for a in self.return_agent}
+        infos = {a: {"p": prob} for a in self.return_agent}
+        self.needs_reset = any(dones.values()) or any(truncateds.values())
 
         return self.observations, rewards, dones, truncateds, infos
 
@@ -365,8 +381,8 @@ class SoccerSimultaneousEnv:
         # currently the integer representation of the state
         # later we need the rotation, then integer (both player "see" the same perspective)
         # also this observation is the same integer for both, later it won't
-        self.observations = (self.state_space[self.state], self.state_space[self.state]) if self.multiagent else self.state_space[self.state]
-        infos = ({"p": p}, {"p": p}) if self.multiagent else {"p": p}
+        self.observations = {a: self.state_space[self.state] for a in self.return_agent}
+        infos = {a: {"p": p} for a in self.return_agent}
         self.lastaction = None
         self.needs_reset = False
         return self.observations, infos
@@ -416,10 +432,10 @@ class SoccerSimultaneousEnv:
             print(f"Last actions: A: {self.ACTION_STRING[action_a]}, B: {self.ACTION_STRING[action_b]}")
         elif self.lastaction and not self.multiagent:
             if self.player_a_policy is None:
-                action_a = self.lastaction
+                action_a = self.lastaction['player_a']
                 print(f"Last action: A: {self.ACTION_STRING[action_a]}")
             elif self.player_b_policy is None:
-                action_b = self.lastaction
+                action_b = self.lastaction['player_b']
                 print(f"Last action: B: {self.ACTION_STRING[action_b]}")
             else:
                 raise ValueError("No policy provided for both players, but action is an integer")
@@ -455,20 +471,20 @@ def main():
 
         # Select random actions for both players
         action_a = env.action_space.sample()
-        action_b = env.action_space.sample()
+        # action_b = env.action_space.sample()
 
         # Take a step in the environment
-        # observation, reward, done, truncated, info = env.step((action_a, action_b))
-        os, rs, ds, ts, fs = env.step(action_a)
-        all_done = any(ds) or any(ts)
+        # observation, reward, done, truncated, info = env.step({'player_a': action_a, 'player_b': action_b})
+        os, rs, ds, ts, fs = env.step({'player_a': action_a})
+        all_done = any(ds.values()) or any(ts.values())
         print(f"Values after step {n_steps}:")
-        for i, po in enumerate(os):
+        for k, po in os.items():
             print(f"{po}:")
-            print(f"\tobservation: {os[i]}")
-            print(f"\treward: {rs[i]}")
-            print(f"\tdone: {ds[i]}")
-            print(f"\ttruncated: {ts[i]}")
-            print(f"\tinfo: {fs[i]}")
+            print(f"\tobservation: {os[k]}")
+            print(f"\treward: {rs[k]}")
+            print(f"\tdone: {ds[k]}")
+            print(f"\ttruncated: {ts[k]}")
+            print(f"\tinfo: {fs[k]}")
 
         n_steps += 1
 
