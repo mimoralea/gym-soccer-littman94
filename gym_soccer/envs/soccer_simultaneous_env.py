@@ -29,9 +29,10 @@ class SoccerSimultaneousEnv:
         WEST: (-1, 0),
     }
     MOVE_TO_ACTION_INT = {v: k for k, v in ACTION_INT_TO_MOVE.items()}
+    TERMINAL_STATE = (-1, -1, -1, -1, -1)
 
 
-    def __init__(self, width=5, height=4, slip_prob=0.0, player_a_policy=None, player_b_policy=None):
+    def __init__(self, width=5, height=4, slip_prob=0.0, player_a_policy=None, player_b_policy=None, seed=0):
 
         # Assert that both policies cannot be set simultaneously
         assert not (player_a_policy and player_b_policy), "Both players cannot have a policy. At least one must be None."
@@ -47,18 +48,21 @@ class SoccerSimultaneousEnv:
         self.width = width + 2  # +2 for the columns where goals are located
         self.height = height
         self.slip_prob = slip_prob
+        self.seed = seed
         self.player_a_policy = player_a_policy
         self.player_b_policy = player_b_policy
         self.multiagent = player_a_policy is None and player_b_policy is None
         self.return_agent = ['player_a', 'player_b'] if self.multiagent else ['player_a'] \
             if player_a_policy is None else ['player_b']
         self.np_random = np.random.RandomState()
+        self.np_random.seed(self.seed)
 
         self.goal_rows = ((self.height - 1) // 2, self.height // 2) if self.height % 2 == 0 else (self.height // 2 - 1, self.height // 2, self.height // 2 + 1)
         self.goal_cols = (0, self.width - 1)
 
-        self.unreachable_states, self.terminal_states = [], {} # containing rewards for player A
-        self.state_space, self.n_states = {}, 1 # single terminal state
+        self.unreachable_states, self.goal_states = [], {} # containing rewards for player A
+        self.state_space, self.n_states = {}, 1
+        self.state_space[self.TERMINAL_STATE] = 0 # initialize the terminal state
         for xa in range(self.height):
             for ya in range(self.width):
                 for xb in range(self.height):
@@ -83,9 +87,6 @@ class SoccerSimultaneousEnv:
                                 self.unreachable_states.append(state_tuple)
                                 continue
 
-                            self.state_space[state_tuple] = self.n_states
-                            self.n_states += 1
-
                             # Terminal states, goals (with possession)
                             if xa in self.goal_rows and ya in self.goal_cols and p == 0 or \
                                xb in self.goal_rows and yb in self.goal_cols and p == 1:
@@ -98,9 +99,14 @@ class SoccerSimultaneousEnv:
 
                                 assert ga or gb, "At least one goal must have been scored to be here"
                                 assert not (ga and gb), "We cannot have both goals scored"
-                                self.terminal_states[state_tuple] = 1.0 if ga else -1.0 if gb else 0.0
-                                self.n_states -= 1 # only one terminal state is included in the observation space
+                                self.goal_states[state_tuple] = 1.0 if ga else -1.0 if gb else 0.0                            
+                                continue
 
+                            self.state_space[state_tuple] = self.n_states
+                            self.n_states += 1
+
+        assert self.n_states == len(self.state_space), "State space should be the same length as the number of states"
+        self._reverse_state_space = {v: k for k, v in self.state_space.items()}
         # Initialize the state space and action space
         # self.n_states = self.width * self.height * self.width * self.height * 2  # width * height * width * height * 2 (possession)
         self.n_actions = len(self.ACTION_STRING)  # Actions: UP, DOWN, LEFT, RIGHT, STAND
@@ -171,7 +177,7 @@ class SoccerSimultaneousEnv:
                             if st in self.unreachable_states:
                                 continue # skip unreachable states
 
-                            s = self.state_space[st]
+                            s = self._state_to_observation(st)
                             P[s] = {}
                             P_readable[st] = {}
 
@@ -224,16 +230,24 @@ class SoccerSimultaneousEnv:
                                         # Get all next state possible outcomes for the action, and move (slip)
                                         nso = self._get_next_state(st, ja, jma)
                                         for nsp, ns in nso:
-                                            d = ns in self.terminal_states
-                                            r = self.terminal_states[ns] if d else 0.0
+                                            if st == ns and st in self.goal_states:
+                                                d, r = True, 0.0
+                                            elif st != ns and ns in self.goal_states:
+                                                d, r = True, self.goal_states[ns]
+                                            else:
+                                                d, r = False, 0.0
+                                            p = mp * nsp
+                                            # flip reward for player B in single agent case
+                                            if not self.multiagent and self.return_agent == 'player_b':
+                                                r = -1 * r
                                             transitions.append((
-                                                mp * nsp, # probability of the move (slip), and next_state
-                                                self.state_space[ns], # next state
+                                                p, # probability of the move (slip), and next_state
+                                                self._state_to_observation(ns), # next state
                                                 r, # reward
                                                 d # done
                                             ))
                                             transitions_readable.append((
-                                                mp * nsp, # probability of the move (slip), and next_state
+                                                p, # probability of the move (slip), and next_state
                                                 ns, # next state
                                                 r, # reward
                                                 d # done
@@ -258,6 +272,10 @@ class SoccerSimultaneousEnv:
                                     assert abs(tp - 1.0) < 1e-6, \
                                         f"Probabilities do not sum to 1 for state {st}, actions {aa}, {ab}. Sum: {tp}"
 
+        # P is the compact representation of the transition dynamics
+        # P_readable is the same but with the states represented as tuples
+        # P_readable terminal states are the tuples that are in goal_states
+        # P has 0 as the terminal states
         return P, P_readable
 
 
@@ -265,7 +283,7 @@ class SoccerSimultaneousEnv:
         xa, ya, xb, yb, p = st
 
         # terminal states
-        if st in self.terminal_states:
+        if st in self.goal_states:
             return [(1.0, st)]
 
         # original action integers and move action (including slips)
@@ -362,12 +380,14 @@ class SoccerSimultaneousEnv:
         transitions = self.P_readable[self.state][action_readable]
         i = categorical_sample([t[0] for t in transitions], self.np_random)
         prob, self.state, reward, done = transitions[i]
-        self.observations = {a: self.state_space[self.state] for a in self.return_agent}
+        self.observations = {a: self._state_to_observation(self.state) for a in self.return_agent}
         self.lastaction = action
-        rewards = {a: reward * (1 if 'player_a' in a else -1) for a in self.return_agent}
+        rewards = {a: reward for a in self.return_agent}
+        if self.multiagent:
+            rewards['player_b'] *= -1
         dones = {a: done for a in self.return_agent}
         truncateds = {a: False for a in self.return_agent}
-        infos = {a: {"p": prob} for a in self.return_agent}
+        infos = {a: {"p": np.round(prob, 2)} for a in self.return_agent}
         self.needs_reset = any(dones.values()) or any(truncateds.values())
 
         return self.observations, rewards, dones, truncateds, infos
@@ -381,8 +401,8 @@ class SoccerSimultaneousEnv:
         # currently the integer representation of the state
         # later we need the rotation, then integer (both player "see" the same perspective)
         # also this observation is the same integer for both, later it won't
-        self.observations = {a: self.state_space[self.state] for a in self.return_agent}
-        infos = {a: {"p": p} for a in self.return_agent}
+        self.observations = {a: self._state_to_observation(self.state) for a in self.return_agent}
+        infos = {a: {"p": np.round(p, 2)} for a in self.return_agent}
         self.lastaction = None
         self.needs_reset = False
         return self.observations, infos
@@ -452,45 +472,77 @@ class SoccerSimultaneousEnv:
             elif yb == self.width - 1 and goal_start <= xb < goal_end:
                 print("OWN GOAL! Player B scored in their own goal!")
 
+    def _state_to_observation(self, state):
+        state = self.TERMINAL_STATE if state in self.goal_states else state
+        return self.state_space[state]
+
+    def _observation_to_state(self, observation):
+        return self._reverse_state_space[observation]
+
 def main():
-    import pickle
-    with open('random_policy_5x4.pkl', 'rb') as f:
-        random_policy = pickle.load(f)
+    n_states = 761 # 4x5 field
+    n_actions = 5
+    from gym_soccer.utils.policies import get_random_policy, get_stand_policy
+    from gym_soccer.utils.planners import value_iteration
+
+    random_policy = get_random_policy(n_states, n_actions, seed=0)
+    stand_policy = get_stand_policy(n_states)
+    player_b_policy = random_policy
 
     # Create the environment
-    env = SoccerSimultaneousEnv(width=5, height=4, slip_prob=0.2, player_a_policy=None, player_b_policy=random_policy)
+    env = SoccerSimultaneousEnv(
+        width=5, height=4, slip_prob=0.2, player_a_policy=player_b_policy, player_b_policy=None)
 
-    # Reset the environment
-    os, fs = env.reset()
+    br_V, br_Q, br_pi = value_iteration(env.P)
+    print(br_V)
+    print(br_Q)
+    print(br_pi)
 
-    all_done = False
-    n_steps = 0
-    while not all_done:
-        # Render the environment
-        env.render()
+    n_episodes = 100
+    rewards, steps = [], []    
+    for i in range(n_episodes):
 
-        # Select random actions for both players
-        action_a = env.action_space.sample()
-        # action_b = env.action_space.sample()
+        # Reset the environment
+        os, fs = env.reset()
+        rewards.append(0)
+        steps.append(0)
+        all_done = False
+        while not all_done:
+            
+            # Render the environment
+            if i == n_episodes - 1:
+                env.render()
 
-        # Take a step in the environment
-        # observation, reward, done, truncated, info = env.step({'player_a': action_a, 'player_b': action_b})
-        os, rs, ds, ts, fs = env.step({'player_a': action_a})
-        all_done = any(ds.values()) or any(ts.values())
-        print(f"Values after step {n_steps}:")
-        for k, po in os.items():
-            print(f"{po}:")
-            print(f"\tobservation: {os[k]}")
-            print(f"\treward: {rs[k]}")
-            print(f"\tdone: {ds[k]}")
-            print(f"\ttruncated: {ts[k]}")
-            print(f"\tinfo: {fs[k]}")
+            # Select random actions for both players
+            # action_a = env.action_space['player_a'].sample()
+            # action_b = env.action_space.sample()
+            action_a = br_pi[os['player_b']]
+            # action_a = env.EAST
 
-        n_steps += 1
+            # Take a step in the environment
+            # observation, reward, done, truncated, info = env.step({'player_a': action_a, 'player_b': action_b})
+            os, rs, ds, ts, fs = env.step({'player_b': action_a})
+            rewards[-1] += rs['player_b']
+          
+            all_done = any(ds.values()) or any(ts.values())
+            if i == n_episodes - 1:
+                print(f"Values after step {steps[-1]}:")
+                for k, po in os.items():
+                    print(f"{po}:")
+                    print(f"\tobservation: {os[k]}")
+                    print(f"\treward: {rs[k]}")
+                    print(f"\tdone: {ds[k]}")
+                    print(f"\ttruncated: {ts[k]}")
+                    print(f"\tinfo: {fs[k]}")
 
-    # Render the final state
-    env.render()
-    print(f"Episode finished after {n_steps} steps!")
+            steps[-1] += 1
+
+        if i == n_episodes - 1:
+            # Render the final state
+            env.render()
+
+    print(f"All {n_episodes} episodes finished with average reward {np.mean(rewards)} and average steps {np.mean(steps)}.")
+
 
 if __name__ == "__main__":
     main()

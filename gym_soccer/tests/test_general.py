@@ -51,6 +51,44 @@ def test_initial_state_distribution(width, height):
 
     assert len(env.isd) == expected_states, f"Expected {expected_states} initial states, but got {len(env.isd)}"
 
+@pytest.mark.parametrize("width,height", [
+    (5, 4),  # Minimum size, even height
+    (6, 4),  # even height
+    (7, 5),  # Odd height
+    (9, 6),  # Even height
+    (11, 7),  # Odd height
+])
+def test_env_P_structure(width, height):
+    env = SoccerSimultaneousEnv(width=width, height=height)
+    
+    # Check that env.P is a dictionary
+    assert isinstance(env.P, dict), "env.P should be a dictionary"
+    
+    # Check that all keys in env.P are integers from 0 to len(env.P) - 1
+    expected_keys = set(range(len(env.P)))
+    actual_keys = set(env.P.keys())
+    assert actual_keys == expected_keys, f"env.P keys should be integers from 0 to {len(env.P) - 1}"
+    
+    # Check that all values in env.P are dictionaries
+    for state, actions in env.P.items():
+        assert isinstance(actions, dict), f"env.P[{state}] should be a dictionary"
+        
+        # Check that all action keys are valid
+        valid_actions = set(env.P[0].keys())
+        assert set(actions.keys()) == valid_actions, f"Invalid action keys in env.P[{state}]"
+        
+        # Check the structure of each action's transitions
+        for action, transitions in actions.items():
+            assert isinstance(transitions, list), f"env.P[{state}][{action}] should be a list"
+            for transition in transitions:
+                assert len(transition) == 4, f"Each transition in env.P[{state}][{action}] should have 4 elements"
+                prob, next_state, reward, done = transition
+                assert 0 <= prob <= 1, f"Transition probability should be between 0 and 1, got {prob}"
+                assert isinstance(next_state, int) and 0 <= next_state < len(env.P), f"Invalid next state: {next_state}"
+                assert isinstance(reward, (int, float)), f"Reward should be a number, got {type(reward)}"
+                assert isinstance(done, bool), f"Done flag should be a boolean, got {type(done)}"
+
+    print(f"env.P structure test passed for width={width}, height={height}")
 
 @pytest.mark.parametrize("width,height", [
     (5, 4),  # Minimum size, even height
@@ -262,3 +300,159 @@ def test_multiagent():
     assert isinstance(terminated, dict) and isinstance(terminated['player_a'], bool) and isinstance(terminated['player_b'], bool), "Terminated should be a dictionary with boolean values."
     assert isinstance(truncated, dict) and isinstance(truncated['player_a'], bool) and isinstance(truncated['player_b'], bool), "Truncated should be a dictionary with boolean values."
     assert isinstance(info, dict) and 'player_a' in info and 'player_b' in info, "Info should be a dictionary with both player_a and player_b."
+
+def test_value_iteration_against_stand_policy_for_player_a():
+    from gym_soccer.utils.policies import get_stand_policy
+    from gym_soccer.utils.planners import value_iteration
+
+
+    width = 5
+    height = 4
+    slip_prob = 0.2
+    n_states = 761  # 4x5 field
+
+    # Create stand policy for player B
+    stand_policy = get_stand_policy(n_states)
+
+    # Create the environment with player B using the stand policy
+    env = SoccerSimultaneousEnv(
+        width=width, height=height, slip_prob=slip_prob,
+        player_a_policy=None, player_b_policy=stand_policy
+    )
+
+    # Run value iteration to get the optimal policy for player A
+    V, Q, optimal_policy = value_iteration(env.P)
+
+    # Test the optimal policy against the stand policy
+    n_episodes = 1000
+    wins = 0
+
+    for _ in range(n_episodes):
+        obs, _ = env.reset()
+        done = False
+        while not done:
+            action = optimal_policy[obs['player_a']]
+            obs, reward, terminated, truncated, _ = env.step({'player_a': action})
+            done = terminated['player_a'] or truncated['player_a']
+            if terminated['player_a'] and reward['player_a'] > 0:
+                wins += 1
+
+    win_rate = wins / n_episodes
+    assert win_rate == 1.0, f"Expected 100% win rate, but got {win_rate * 100}%"
+
+
+def test_value_iteration_against_random_policy_for_player_a():
+    from gym_soccer.utils.policies import get_random_policy
+    from gym_soccer.utils.planners import value_iteration
+
+    width = 5
+    height = 4
+    slip_prob = 0.2
+    n_states = 761  # 4x5 field
+    n_actions = 5
+
+    # Create random policy for player B
+    random_policy = get_random_policy(n_states, n_actions, seed=42)
+
+    # Create the environment with player B using the random policy
+    env = SoccerSimultaneousEnv(
+        width=width, height=height, slip_prob=slip_prob,
+        player_a_policy=None, player_b_policy=random_policy
+    )
+
+    # Run value iteration to get the optimal policy for player A
+    V, Q, optimal_policy = value_iteration(env.P)
+
+    # Test the optimal policy against the random policy
+    n_episodes = 1000
+    wins = 0
+
+    for _ in range(n_episodes):
+        obs, _ = env.reset()
+        done = False
+        while not done:
+            action = optimal_policy[obs['player_a']]
+            obs, reward, terminated, truncated, _ = env.step({'player_a': action})
+            done = terminated['player_a'] or truncated['player_a']
+            if terminated['player_a'] and reward['player_a'] > 0:
+                wins += 1
+
+    win_rate = wins / n_episodes
+    assert win_rate > 0.95, f"Expected win rate > 95%, but got {win_rate * 100}%"
+
+def test_value_iteration_against_stand_policy_for_player_b():
+    from gym_soccer.utils.policies import get_stand_policy
+    from gym_soccer.utils.planners import value_iteration
+
+    width = 5
+    height = 4
+    slip_prob = 0.2
+    n_states = 761  # 4x5 field
+
+    # Create stand policy for player A
+    stand_policy = get_stand_policy(n_states)
+
+    # Create the environment with player A using the stand policy
+    env = SoccerSimultaneousEnv(
+        width=width, height=height, slip_prob=slip_prob,
+        player_a_policy=stand_policy, player_b_policy=None
+    )
+
+    # Run value iteration to get the optimal policy for player B
+    V, Q, optimal_policy = value_iteration(env.P)
+
+    # Test the optimal policy against the stand policy
+    n_episodes = 1000
+    wins = 0
+
+    for _ in range(n_episodes):
+        obs, _ = env.reset()
+        done = False
+        while not done:
+            action = optimal_policy[obs['player_b']]
+            obs, reward, terminated, truncated, _ = env.step({'player_b': action})
+            done = terminated['player_b'] or truncated['player_b']
+            if terminated['player_b'] and reward['player_b'] > 0:
+                wins += 1
+
+    win_rate = wins / n_episodes
+    assert win_rate == 1.0, f"Expected 100% win rate, but got {win_rate * 100}%"
+
+def test_value_iteration_against_random_policy_for_player_b():
+    from gym_soccer.utils.policies import get_random_policy
+    from gym_soccer.utils.planners import value_iteration
+
+    width = 5
+    height = 4
+    slip_prob = 0.2
+    n_states = 761  # 4x5 field
+    n_actions = 5
+
+    # Create random policy for player A
+    random_policy = get_random_policy(n_states, n_actions, seed=42)
+
+    # Create the environment with player A using the random policy
+    env = SoccerSimultaneousEnv(
+        width=width, height=height, slip_prob=slip_prob,
+        player_a_policy=random_policy, player_b_policy=None
+    )
+
+    # Run value iteration to get the optimal policy for player B
+    V, Q, optimal_policy = value_iteration(env.P)
+
+    # Test the optimal policy against the random policy
+    n_episodes = 1000
+    wins = 0
+
+    for _ in range(n_episodes):
+        obs, _ = env.reset()
+        done = False
+        while not done:
+            action = optimal_policy[obs['player_b']]
+            obs, reward, terminated, truncated, _ = env.step({'player_b': action})
+            done = terminated['player_b'] or truncated['player_b']
+            if terminated['player_b'] and reward['player_b'] > 0:
+                wins += 1
+
+    win_rate = wins / n_episodes
+    assert win_rate > 0.95, f"Expected win rate > 95%, but got {win_rate * 100}%"
