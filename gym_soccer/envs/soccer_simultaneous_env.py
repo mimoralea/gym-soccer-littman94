@@ -238,7 +238,7 @@ class SoccerSimultaneousEnv:
                                                 d, r = False, 0.0
                                             p = mp * nsp
                                             # flip reward for player B in single agent case
-                                            if not self.multiagent and self.return_agent == 'player_b':
+                                            if not self.multiagent and 'player_b' in self.return_agent:
                                                 r = -1 * r
                                             transitions.append((
                                                 p, # probability of the move (slip), and next_state
