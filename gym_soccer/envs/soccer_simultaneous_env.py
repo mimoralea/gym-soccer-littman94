@@ -495,8 +495,8 @@ class SoccerSimultaneousEnv:
         return self._reverse_state_space[observation]
 
 def main():
-    # n_states = 761 # 5x4 field
-    n_states = 11705 # 11x7 field
+    n_states = 761 # 5x4 field
+    # n_states = 11705 # 11x7 field
     n_actions = 5
     import time
     from gym_soccer.utils.policies import get_random_policy, get_stand_policy
