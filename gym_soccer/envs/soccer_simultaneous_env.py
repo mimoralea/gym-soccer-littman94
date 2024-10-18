@@ -61,7 +61,7 @@ class SoccerSimultaneousEnv:
         self.goal_cols = (0, self.width - 1)
 
         self.unreachable_states, self.goal_states = [], {} # containing rewards for player A
-        self.state_space, self.n_states = {}, 1
+        self.state_space, self.nS = {}, 1
         self.state_space[self.TERMINAL_STATE] = 0 # initialize the terminal state
         for xa in range(self.height):
             for ya in range(self.width):
@@ -99,17 +99,17 @@ class SoccerSimultaneousEnv:
 
                                 assert ga or gb, "At least one goal must have been scored to be here"
                                 assert not (ga and gb), "We cannot have both goals scored"
-                                self.goal_states[state_tuple] = 1.0 if ga else -1.0 if gb else 0.0                            
+                                self.goal_states[state_tuple] = 1.0 if ga else -1.0 if gb else 0.0
                                 continue
 
-                            self.state_space[state_tuple] = self.n_states
-                            self.n_states += 1
+                            self.state_space[state_tuple] = self.nS
+                            self.nS += 1
 
-        assert self.n_states == len(self.state_space), "State space should be the same length as the number of states"
+        assert self.nS == len(self.state_space), "State space should be the same length as the number of states"
         self._reverse_state_space = {v: k for k, v in self.state_space.items()}
         # Initialize the state space and action space
         # self.n_states = self.width * self.height * self.width * self.height * 2  # width * height * width * height * 2 (possession)
-        self.n_actions = len(self.ACTION_STRING)  # Actions: UP, DOWN, LEFT, RIGHT, STAND
+        self.nA = len(self.ACTION_STRING)  # Actions: UP, DOWN, LEFT, RIGHT, STAND
 
         # # TODO: this is a test, remove it
         # # Generate a random policy for player B
@@ -124,17 +124,17 @@ class SoccerSimultaneousEnv:
 
         # Update observation space to be Discrete
         self.observation_space = spaces.Dict({
-            a: spaces.Discrete(self.n_states) for a in self.return_agent
+            a: spaces.Discrete(self.nS) for a in self.return_agent
         })
         self.action_space = spaces.Dict({
-            a: spaces.Discrete(self.n_actions) for a in self.return_agent
+            a: spaces.Discrete(self.nA) for a in self.return_agent
         })
 
         # Define the initial state distribution
         self.isd = self._generate_isd()
 
         # Define transition dynamics and create observation cache
-        self.P, self.P_readable = self._initialize_transition_dynamics()
+        self.P, self.P_readable, self.Pmat, self.Rmat = self._initialize_transition_dynamics()
 
         # Add a flag to track if reset has been called
         self.needs_reset = True
@@ -167,6 +167,8 @@ class SoccerSimultaneousEnv:
     def _initialize_transition_dynamics(self):
         P = {}
         P_readable = {}
+        Pmat = np.zeros([self.nS, self.nS, self.nA])
+        Rmat = np.zeros([self.nS, self.nA])
 
         for xa in range(self.height):
             for ya in range(self.width):
@@ -182,8 +184,8 @@ class SoccerSimultaneousEnv:
                             P_readable[st] = {}
 
                             # All actions integer for a and b, sample a policy if provided
-                            aaa = list(range(self.n_actions)) if self.player_a_policy is None else [self.player_a_policy[s]]
-                            aab = list(range(self.n_actions)) if self.player_b_policy is None else [self.player_b_policy[s]]
+                            aaa = list(range(self.nA)) if self.player_a_policy is None else [self.player_a_policy[s]]
+                            aab = list(range(self.nA)) if self.player_b_policy is None else [self.player_b_policy[s]]
                             for aa in aaa:
                                 asa = self.ACTION_STRING[aa]
 
@@ -255,13 +257,25 @@ class SoccerSimultaneousEnv:
                                     # if we need to account for joint actions
                                     if self.multiagent:
                                         P[s][ja] = transitions
+                                        Rmat[s][ja] = 0  # Initialize reward to 0
+                                        for prob, next_state, reward, done in transitions:
+                                            Pmat[s][next_state][ja] += prob
+                                            Rmat[s][ja] += prob * reward  # Weighted sum of rewards
                                         P_readable[st][jas] = transitions_readable
                                     # if we need to account for individual actions a and b
                                     elif self.player_a_policy is None and self.player_b_policy is not None:
                                         P[s][aa] = transitions
+                                        Rmat[s][aa] = 0  # Initialize reward to 0
+                                        for prob, next_state, reward, done in transitions:
+                                            Pmat[s][next_state][aa] += prob
+                                            Rmat[s][aa] += prob * reward  # Weighted sum of rewards
                                         P_readable[st][asa] = transitions_readable
                                     elif self.player_b_policy is None and self.player_a_policy is not None:
                                         P[s][ab] = transitions
+                                        Rmat[s][ab] = 0  # Initialize reward to 0
+                                        for prob, next_state, reward, done in transitions:
+                                            Pmat[s][next_state][ab] += prob
+                                            Rmat[s][ab] += prob * reward  # Weighted sum of rewards
                                         P_readable[st][asb] = transitions_readable
                                     # error case
                                     else:
@@ -276,7 +290,7 @@ class SoccerSimultaneousEnv:
         # P_readable is the same but with the states represented as tuples
         # P_readable terminal states are the tuples that are in goal_states
         # P has 0 as the terminal states
-        return P, P_readable
+        return P, P_readable, Pmat, Rmat
 
 
     def _get_next_state(self, st, ja, jma):
@@ -375,7 +389,7 @@ class SoccerSimultaneousEnv:
             assert 'player_a' in action or 'player_b' in action, "Action must contain either 'player_a' or 'player_b'"
             assert not ('player_a' in action and 'player_b' in action), "Action must contain only one of 'player_a' or 'player_b'"
             only_agent = 'player_a' if self.player_a_policy is None else 'player_b'
-    
+
         action_readable = (self.ACTION_STRING[action['player_a']], self.ACTION_STRING[action['player_b']]) if self.multiagent else self.ACTION_STRING[action[only_agent]]
         transitions = self.P_readable[self.state][action_readable]
         i = categorical_sample([t[0] for t in transitions], self.np_random)
@@ -482,8 +496,9 @@ class SoccerSimultaneousEnv:
 def main():
     n_states = 761 # 4x5 field
     n_actions = 5
+    import time
     from gym_soccer.utils.policies import get_random_policy, get_stand_policy
-    from gym_soccer.utils.planners import value_iteration
+    from gym_soccer.utils.planners import value_iteration, policy_iteration, modified_policy_iteration
 
     random_policy = get_random_policy(n_states, n_actions, seed=0)
     stand_policy = get_stand_policy(n_states)
@@ -491,15 +506,58 @@ def main():
 
     # Create the environment
     env = SoccerSimultaneousEnv(
-        width=5, height=4, slip_prob=0.2, player_a_policy=player_b_policy, player_b_policy=None)
+        width=5, height=4, slip_prob=0.2,
+        player_a_policy=None, player_b_policy=player_b_policy)
+    # env = SoccerSimultaneousEnv(
+    #     width=5, height=4, slip_prob=0.2,
+    #     player_a_policy=player_b_policy, player_b_policy=None)
+    k_1 = 1
+    k_2 = 10000000
+    theta = 1e-10
+    discount_factor = 0.99
+    # Value iteration
+    vi_time = time.time()
+    vi_br_pi, vi_br_V, vi_br_Q, vi_cc = value_iteration(env, theta=theta, discount_factor=discount_factor)
+    vi_time = time.time() - vi_time
 
-    br_V, br_Q, br_pi = value_iteration(env.P)
-    print(br_V)
-    print(br_Q)
-    print(br_pi)
+    # Policy iteration
+    pi_time = time.time()
+    pi_br_pi, pi_br_V, pi_br_Q, pi_cc = policy_iteration(env, theta=theta, discount_factor=discount_factor)
+    pi_time = time.time() - pi_time
+
+    # Modified policy iteration, 1 pass for each policy evaluation
+    mpi_1_time = time.time()
+    mpi_1_br_pi, mpi_1_br_V, mpi_1_br_Q, mpi_1_cc = modified_policy_iteration(env, k=k_1, theta=theta, discount_factor=discount_factor)
+    mpi_1_time = time.time() - mpi_1_time
+
+    # Modified policy iteration, infinite passes for each policy evaluation
+    mpi_2_time = time.time()
+    mpi_2_br_pi, mpi_2_br_V, mpi_2_br_Q, mpi_2_cc = modified_policy_iteration(env, k=k_2, theta=theta, discount_factor=discount_factor)
+    mpi_2_time = time.time() - mpi_2_time
+
+    # Check if all policies are the same
+    assert np.all(vi_br_pi == pi_br_pi), "Value iteration and policy iteration should converge to the same policy"
+    assert np.all(vi_br_pi == mpi_1_br_pi), "Value iteration and modified policy iteration should converge to the same policy"
+    assert np.all(vi_br_pi == mpi_2_br_pi), "Value iteration and modified policy iteration should converge to the same policy"
+
+    # Check if all value functions are the same
+    assert np.allclose(vi_br_V, pi_br_V), "Value iteration and policy iteration should converge to the same value function"
+    assert np.allclose(vi_br_V, mpi_1_br_V), "Value iteration and modified policy iteration should converge to the same value function"
+    assert np.allclose(vi_br_V, mpi_2_br_V), "Value iteration and modified policy iteration should converge to the same value function"
+
+    # Check if all Q-functions are the same
+    assert np.allclose(vi_br_Q, pi_br_Q), "Value iteration and policy iteration should converge to the same Q-function"
+    assert np.allclose(vi_br_Q, mpi_1_br_Q), "Value iteration and modified policy iteration should converge to the same Q-function"
+    assert np.allclose(vi_br_Q, mpi_2_br_Q), "Value iteration and modified policy iteration should converge to the same Q-function"
+
+    print("VI, PI, and MPI converged to the same result.")
+    print(f"Value iteration number of iterations: {vi_cc} in {vi_time:.2f} seconds")
+    print(f"Policy iteration number of iterations: {pi_cc} in {pi_time:.2f} seconds")
+    print(f"Modified policy iteration (k={k_1}) number of iterations: {mpi_1_cc} in {mpi_1_time:.2f} seconds")
+    print(f"Modified policy iteration (k={k_2}) number of iterations: {mpi_2_cc} in {mpi_2_time:.2f} seconds")
 
     n_episodes = 100
-    rewards, steps = [], []    
+    rewards, steps = [], []
     for i in range(n_episodes):
 
         # Reset the environment
@@ -508,7 +566,7 @@ def main():
         steps.append(0)
         all_done = False
         while not all_done:
-            
+
             # Render the environment
             if i == n_episodes - 1:
                 env.render()
@@ -516,14 +574,15 @@ def main():
             # Select random actions for both players
             # action_a = env.action_space['player_a'].sample()
             # action_b = env.action_space.sample()
-            action_a = br_pi[os['player_b']]
+            action_a = mpi_1_br_pi[os['player_a']]
+            # action_a = br_pi[os['player_b']]
             # action_a = env.EAST
 
             # Take a step in the environment
             # observation, reward, done, truncated, info = env.step({'player_a': action_a, 'player_b': action_b})
-            os, rs, ds, ts, fs = env.step({'player_b': action_a})
-            rewards[-1] += rs['player_b']
-          
+            os, rs, ds, ts, fs = env.step({'player_a': action_a})
+            rewards[-1] += rs['player_a']
+
             all_done = any(ds.values()) or any(ts.values())
             if i == n_episodes - 1:
                 print(f"Values after step {steps[-1]}:")
