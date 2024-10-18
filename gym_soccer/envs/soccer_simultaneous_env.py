@@ -35,11 +35,11 @@ class SoccerSimultaneousEnv:
     def __init__(self, width=5, height=4, slip_prob=0.0, player_a_policy=None, player_b_policy=None, seed=0):
 
         # Assert that both policies cannot be set simultaneously
-        assert not (player_a_policy and player_b_policy), "Both players cannot have a policy. At least one must be None."
-        if player_a_policy is not None:
-            assert isinstance(player_a_policy, dict), "Player A policy must be a dictionary."
-        if player_b_policy is not None:
-            assert isinstance(player_b_policy, dict), "Player B policy must be a dictionary."
+        assert not (player_a_policy is not None and player_b_policy is not None), "Both players cannot have a policy. At least one must be None."
+        # if player_a_policy is not None:
+        #     assert isinstance(player_a_policy, dict), "Player A policy must be a dictionary."
+        # if player_b_policy is not None:
+        #     assert isinstance(player_b_policy, dict), "Player B policy must be a dictionary."
 
         # Minimum pitch size is 5x4
         assert width >= 5, "Width must be at least 5 columns."
@@ -396,11 +396,12 @@ class SoccerSimultaneousEnv:
         prob, self.state, reward, done = transitions[i]
         self.observations = {a: self._state_to_observation(self.state) for a in self.return_agent}
         self.lastaction = action
+        self.timestep += 1
         rewards = {a: reward for a in self.return_agent}
         if self.multiagent:
             rewards['player_b'] *= -1
         dones = {a: done for a in self.return_agent}
-        truncateds = {a: False for a in self.return_agent}
+        truncateds = {a: self.timestep >= 100 for a in self.return_agent}
         infos = {a: {"p": np.round(prob, 2)} for a in self.return_agent}
         self.needs_reset = any(dones.values()) or any(truncateds.values())
 
@@ -419,6 +420,7 @@ class SoccerSimultaneousEnv:
         infos = {a: {"p": np.round(p, 2)} for a in self.return_agent}
         self.lastaction = None
         self.needs_reset = False
+        self.timestep = 0
         return self.observations, infos
 
     def render(self):
@@ -458,7 +460,7 @@ class SoccerSimultaneousEnv:
         # Print additional information
         print(f"Ball possession: {'A' if p == 0 else 'B'}")
         if self.lastaction and self.multiagent:
-            action_a, action_b = self.lastaction
+            action_a, action_b = self.lastaction.values()
             print(f"Last actions: A: {self.ACTION_STRING[action_a]}, B: {self.ACTION_STRING[action_b]}")
         elif self.lastaction and not self.multiagent:
             if self.player_a_policy is None:
