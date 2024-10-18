@@ -60,23 +60,23 @@ def test_initial_state_distribution(width, height):
 ])
 def test_env_P_structure(width, height):
     env = SoccerSimultaneousEnv(width=width, height=height)
-    
+
     # Check that env.P is a dictionary
     assert isinstance(env.P, dict), "env.P should be a dictionary"
-    
+
     # Check that all keys in env.P are integers from 0 to len(env.P) - 1
     expected_keys = set(range(len(env.P)))
     actual_keys = set(env.P.keys())
     assert actual_keys == expected_keys, f"env.P keys should be integers from 0 to {len(env.P) - 1}"
-    
+
     # Check that all values in env.P are dictionaries
     for state, actions in env.P.items():
         assert isinstance(actions, dict), f"env.P[{state}] should be a dictionary"
-        
+
         # Check that all action keys are valid
         valid_actions = set(env.P[0].keys())
         assert set(actions.keys()) == valid_actions, f"Invalid action keys in env.P[{state}]"
-        
+
         # Check the structure of each action's transitions
         for action, transitions in actions.items():
             assert isinstance(transitions, list), f"env.P[{state}][{action}] should be a list"
@@ -179,7 +179,7 @@ def test_singleagent_a():
     assert isinstance(env.action_space, spaces.Dict), "Action space should be a dictionary."
     assert env.action_space['player_a'].n == n_actions, "Action space should have the correct number of actions."
     assert 'player_b' not in env.action_space, "Action space should not contain player_b."
-    
+
     obs, info = env.reset()
     assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
     assert 'player_a' in obs, "Observation should contain player_a."
@@ -231,7 +231,7 @@ def test_singleagent_b():
     assert isinstance(env.action_space, spaces.Dict), "Action space should be a dictionary."
     assert env.action_space['player_b'].n == n_actions, "Action space should have the correct number of actions."
     assert 'player_a' not in env.action_space, "Action space should not contain player_a."
-    
+
     obs, info = env.reset()
     assert isinstance(obs, dict), "Observation should be a dictionary, single agent mode."
     assert 'player_b' in obs, "Observation should contain player_b."
@@ -321,7 +321,7 @@ def test_value_iteration_against_stand_policy_for_player_a():
     )
 
     # Run value iteration to get the optimal policy for player A
-    V, Q, optimal_policy = value_iteration(env.P)
+    optimal_policy, optimal_V, optimal_Q, cc = value_iteration(env, theta=1e-10, discount_factor=0.99)
 
     # Test the optimal policy against the stand policy
     n_episodes = 1000
@@ -361,7 +361,7 @@ def test_value_iteration_against_random_policy_for_player_a():
     )
 
     # Run value iteration to get the optimal policy for player A
-    V, Q, optimal_policy = value_iteration(env.P)
+    optimal_policy, optimal_V, optimal_Q, cc = value_iteration(env, theta=1e-10, discount_factor=0.99)
 
     # Test the optimal policy against the random policy
     n_episodes = 1000
@@ -399,7 +399,7 @@ def test_value_iteration_against_stand_policy_for_player_b():
     )
 
     # Run value iteration to get the optimal policy for player B
-    V, Q, optimal_policy = value_iteration(env.P)
+    optimal_policy, optimal_V, optimal_Q, cc = value_iteration(env, theta=1e-10, discount_factor=0.99)
 
     # Test the optimal policy against the stand policy
     n_episodes = 1000
@@ -438,7 +438,7 @@ def test_value_iteration_against_random_policy_for_player_b():
     )
 
     # Run value iteration to get the optimal policy for player B
-    V, Q, optimal_policy = value_iteration(env.P)
+    optimal_policy, optimal_V, optimal_Q, cc = value_iteration(env, theta=1e-10, discount_factor=0.99)
 
     # Test the optimal policy against the random policy
     n_episodes = 1000

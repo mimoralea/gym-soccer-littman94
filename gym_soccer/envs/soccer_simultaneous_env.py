@@ -167,8 +167,8 @@ class SoccerSimultaneousEnv:
     def _initialize_transition_dynamics(self):
         P = {}
         P_readable = {}
-        Pmat = np.zeros([self.nS, self.nS, self.nA])
-        Rmat = np.zeros([self.nS, self.nA])
+        Pmat = np.zeros([self.nS, self.nS, self.nA, self.nA]) if self.multiagent else np.zeros([self.nS, self.nS, self.nA])
+        Rmat = np.zeros([self.nS, self.nA, self.nA]) if self.multiagent else np.zeros([self.nS, self.nA])
 
         for xa in range(self.height):
             for ya in range(self.width):
@@ -257,10 +257,10 @@ class SoccerSimultaneousEnv:
                                     # if we need to account for joint actions
                                     if self.multiagent:
                                         P[s][ja] = transitions
-                                        Rmat[s][ja] = 0  # Initialize reward to 0
+                                        Rmat[s][ja[0]][ja[1]] = 0  # Initialize reward to 0
                                         for prob, next_state, reward, done in transitions:
-                                            Pmat[s][next_state][ja] += prob
-                                            Rmat[s][ja] += prob * reward  # Weighted sum of rewards
+                                            Pmat[s][next_state][ja[0]][ja[1]] += prob
+                                            Rmat[s][ja[0]][ja[1]] += prob * reward  # Weighted sum of rewards
                                         P_readable[st][jas] = transitions_readable
                                     # if we need to account for individual actions a and b
                                     elif self.player_a_policy is None and self.player_b_policy is not None:
@@ -437,14 +437,10 @@ class SoccerSimultaneousEnv:
         pitch[xa][ya] = 'A' + ('*' if p == 0 else ' ')
         pitch[xb][yb] = 'B' + ('*' if p == 1 else ' ')
 
-        # Create a 2D array to store the entire pitch representation
-        goal_start = (self.height - 1) // 2
-        goal_end = goal_start + (3 if self.height % 2 else 2)
-
         rendered_pitch = []
         rendered_pitch.append('  ' + '-' * (self.width * 2 - 4))
         for ri, r in enumerate(pitch):
-            if ri in range(goal_start, goal_end):
+            if ri in self.goal_rows:
                 if '*' in r[0]:
                     rendered_pitch.append(''.join(f'{cell:<2}' for cell in r[0:-1]) + '||')
                 elif '*' in r[-1]:
@@ -476,17 +472,22 @@ class SoccerSimultaneousEnv:
 
         # Check for goal or own goal
         if p == 0:  # Player A has the ball
-            if ya == 0 and goal_start <= xa < goal_end:
+            if ya == 0 and xa in self.goal_rows:
                 print("OWN GOAL! Player A scored in their own goal!")
-            elif ya == self.width - 1 and goal_start <= xa < goal_end:
+            elif ya == self.width - 1 and xa in self.goal_rows:
                 print("GOAL! Player A scored!")
         else:  # Player B has the ball
-            if yb == 0 and goal_start <= xb < goal_end:
+            if yb == 0 and xb in self.goal_rows:
                 print("GOAL! Player B scored!")
-            elif yb == self.width - 1 and goal_start <= xb < goal_end:
+            elif yb == self.width - 1 and xb in self.goal_rows:
                 print("OWN GOAL! Player B scored in their own goal!")
 
     def _state_to_observation(self, state):
+        # This function later should rotate the observations
+        # so that both players see the same perspective
+        # currently it's they see the global game state
+        # the problem is the a players trained to solve player a's perspective
+        # cannot perform on player b's perspective
         state = self.TERMINAL_STATE if state in self.goal_states else state
         return self.state_space[state]
 
@@ -494,7 +495,8 @@ class SoccerSimultaneousEnv:
         return self._reverse_state_space[observation]
 
 def main():
-    n_states = 761 # 4x5 field
+    # n_states = 761 # 5x4 field
+    n_states = 11705 # 11x7 field
     n_actions = 5
     import time
     from gym_soccer.utils.policies import get_random_policy, get_stand_policy
@@ -505,12 +507,19 @@ def main():
     player_b_policy = random_policy
 
     # Create the environment
+    # env = SoccerSimultaneousEnv(
+    #     width=5, height=4, slip_prob=0.2,
+    #     player_a_policy=None, player_b_policy=None)
+    # env = SoccerSimultaneousEnv(
+    #     width=11, height=7, slip_prob=0.2,
+    #     player_a_policy=None, player_b_policy=player_b_policy)
     env = SoccerSimultaneousEnv(
         width=5, height=4, slip_prob=0.2,
         player_a_policy=None, player_b_policy=player_b_policy)
     # env = SoccerSimultaneousEnv(
     #     width=5, height=4, slip_prob=0.2,
     #     player_a_policy=player_b_policy, player_b_policy=None)
+
     k_1 = 1
     k_2 = 10000000
     theta = 1e-10
@@ -519,21 +528,25 @@ def main():
     vi_time = time.time()
     vi_br_pi, vi_br_V, vi_br_Q, vi_cc = value_iteration(env, theta=theta, discount_factor=discount_factor)
     vi_time = time.time() - vi_time
+    print("Value iteration converged in {} iterations in {:.2f} seconds".format(vi_cc, vi_time))
 
     # Policy iteration
     pi_time = time.time()
     pi_br_pi, pi_br_V, pi_br_Q, pi_cc = policy_iteration(env, theta=theta, discount_factor=discount_factor)
     pi_time = time.time() - pi_time
+    print("Policy iteration converged in {} iterations in {:.2f} seconds".format(pi_cc, pi_time))
 
     # Modified policy iteration, 1 pass for each policy evaluation
     mpi_1_time = time.time()
     mpi_1_br_pi, mpi_1_br_V, mpi_1_br_Q, mpi_1_cc = modified_policy_iteration(env, k=k_1, theta=theta, discount_factor=discount_factor)
     mpi_1_time = time.time() - mpi_1_time
+    print("Modified policy iteration (k={}) converged in {} iterations in {:.2f} seconds".format(k_1, mpi_1_cc, mpi_1_time))
 
     # Modified policy iteration, infinite passes for each policy evaluation
     mpi_2_time = time.time()
     mpi_2_br_pi, mpi_2_br_V, mpi_2_br_Q, mpi_2_cc = modified_policy_iteration(env, k=k_2, theta=theta, discount_factor=discount_factor)
     mpi_2_time = time.time() - mpi_2_time
+    print("Modified policy iteration (k={}) converged in {} iterations in {:.2f} seconds".format(k_2, mpi_2_cc, mpi_2_time))
 
     # Check if all policies are the same
     assert np.all(vi_br_pi == pi_br_pi), "Value iteration and policy iteration should converge to the same policy"
@@ -549,14 +562,9 @@ def main():
     assert np.allclose(vi_br_Q, pi_br_Q), "Value iteration and policy iteration should converge to the same Q-function"
     assert np.allclose(vi_br_Q, mpi_1_br_Q), "Value iteration and modified policy iteration should converge to the same Q-function"
     assert np.allclose(vi_br_Q, mpi_2_br_Q), "Value iteration and modified policy iteration should converge to the same Q-function"
+    print("All algorithms converged to the same result.")
 
-    print("VI, PI, and MPI converged to the same result.")
-    print(f"Value iteration number of iterations: {vi_cc} in {vi_time:.2f} seconds")
-    print(f"Policy iteration number of iterations: {pi_cc} in {pi_time:.2f} seconds")
-    print(f"Modified policy iteration (k={k_1}) number of iterations: {mpi_1_cc} in {mpi_1_time:.2f} seconds")
-    print(f"Modified policy iteration (k={k_2}) number of iterations: {mpi_2_cc} in {mpi_2_time:.2f} seconds")
-
-    n_episodes = 100
+    n_episodes = 1000
     rewards, steps = [], []
     for i in range(n_episodes):
 
@@ -574,8 +582,8 @@ def main():
             # Select random actions for both players
             # action_a = env.action_space['player_a'].sample()
             # action_b = env.action_space.sample()
-            action_a = mpi_1_br_pi[os['player_a']]
-            # action_a = br_pi[os['player_b']]
+            action_a = vi_br_pi[os['player_a']]
+            # action_a = vi_br_pi[os['player_b']]
             # action_a = env.EAST
 
             # Take a step in the environment
